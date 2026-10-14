@@ -31,13 +31,14 @@ Keep card definitions separate from printings, set membership, and format legali
 
 Treat this as a planning map; refine it as game flow is implemented.
 
-- **Game session:** ID, lifecycle/status, player seats and roles, and final outcome.
-- **Player state:** Role, credits, clicks, score, tags, and other changing player values.
+- **Game session:** ID, lifecycle/status, player seats and roles, and final outcome. Keep waiting-room/session coordination in `src/application/`.
+- **Game state:** Authoritative state for a started game, in `src/game/`.
+- **Player state:** Role, credits, clicks, tags, bad publicity, core damage, and other changing player values. Keep remaining clicks here rather than duplicating them in turn state. Calculate agenda score from cards in the score area (Rule 1.17.1); calculate maximum hand size from core damage and applicable modifiers (Rules 5.5.3, 10.4.2b). The run-specific bad publicity fund belongs in run state (Rules 10.6.2–10.6.3).
 - **Deck and identity:** The selected deck list and identity used to set up each player.
 - **Card definition:** Static card data, including printed text and structured ability definitions.
 - **Card instance:** A specific card in a game, referring to its definition and tracking owner/controller, zone/location, counters, face-up state, and host when applicable.
 - **Zones and board:** Player zones plus the shared play area, including Corp servers and their installed cards/ice.
-- **Turn state:** Active player, turn phase/step, and remaining clicks.
+- **Turn state:** Turn number, active player, and turn phase/step.
 - **Run state:** Attacked server, run phase/step, ice position/encounter progress, and breach/access progress. A run persists in game state across commands and player decisions until it ends.
 - **Resolution state:** Current timing/resolution frames, nested priority windows, pending abilities, and any player prompt awaiting a choice. Keep this flexible; Netrunner timing is broader than a simple LIFO stack.
 - **Player view:** A role-specific projection of game state that hides information the player is not allowed to see. The client maintains its current copy from snapshots and live updates; the player can inspect any information in that copy at any time, including while waiting on the opponent. Inspection reads the local view and does not ask the rules engine to resolve a game command.
