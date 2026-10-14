@@ -35,6 +35,7 @@ class CardZone(StrEnum):
     HAND = "hand"
     DISCARD_PILE = "discard_pile"
     SCORE_AREA = "score_area"
+    IDENTITY = "identity"
     PLAY_AREA = "play_area"
     SET_ASIDE = "set_aside"
     REMOVED_FROM_GAME = "removed_from_game"
@@ -62,6 +63,7 @@ ServerId = CentralServer | RemoteServerPosition
 
 
 NonNegativeCounter = Annotated[int, Field(ge=0)]
+PositiveCardCount = Annotated[int, Field(gt=0)]
 
 
 class ServerLocation(DomainModel):
@@ -108,6 +110,7 @@ class ZoneLocation(DomainModel):
             CardZone.HAND,
             CardZone.DISCARD_PILE,
             CardZone.SCORE_AREA,
+            CardZone.IDENTITY,
         }
         if self.zone in player_zones and self.player_id is None:
             raise ValueError(f"The {self.zone.value} zone requires a player_id")
@@ -151,6 +154,7 @@ class CardInstance(DomainModel):
             CardZone.PLAY_AREA,
             CardZone.DISCARD_PILE,
             CardZone.SCORE_AREA,
+            CardZone.IDENTITY,
             CardZone.SET_ASIDE,
             CardZone.REMOVED_FROM_GAME,
         }
@@ -158,12 +162,32 @@ class CardInstance(DomainModel):
             raise ValueError(f"Cards in {self.location.zone.value} need an explicit face status")
         if self.location.server is not None and not self.installed:
             raise ValueError("A card in a server location must be installed")
+        if self.installed and self.location.zone is not CardZone.PLAY_AREA:
+            raise ValueError("An installed card must be in the play area")
         if self.rezzed and not self.installed:
             raise ValueError("Only an installed card can be rezzed")
         if self.rezzed and self.face_up is not True:
             raise ValueError("A rezzed card must be face up")
         if self.rezzed and self.location.server is None:
             raise ValueError("A rezzed card must be installed in a server")
+        if self.location.zone is CardZone.IDENTITY and self.face_up is not True:
+            raise ValueError("An identity card must be face up")
+        return self
+
+
+class DeckSelection(DomainModel):
+    """The chosen identity and card-definition counts used to build a player's deck."""
+
+    identity_definition_id: str = Field(min_length=1)
+    card_counts: dict[str, PositiveCardCount] = Field(
+        default_factory=dict,
+        description="Main-deck card definition IDs and their selected copy counts",
+    )
+
+    @model_validator(mode="after")
+    def deck_does_not_list_identity(self) -> "DeckSelection":
+        if self.identity_definition_id in self.card_counts:
+            raise ValueError("The identity belongs in its own field, not the main deck")
         return self
 
 
@@ -182,6 +206,8 @@ class PlayerState(DomainModel):
         ge=0,
         description="Runner's maximum available memory, including active modifiers",
     )
+    deck_selection: DeckSelection
+    identity_card_instance_id: UUID
 
     @model_validator(mode="after")
     def counters_match_role(self) -> "PlayerState":
@@ -218,6 +244,7 @@ class GameState(DomainModel):
     runner: PlayerState
     turn: TurnState
     servers: list[ServerId] = Field(default_factory=lambda: list(CentralServer))
+    card_instances: dict[UUID, CardInstance] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def player_fields_match_roles(self) -> "GameState":
@@ -227,6 +254,64 @@ class GameState(DomainModel):
             raise ValueError("corp must have the Corp role")
         if self.runner.role is not PlayerRole.RUNNER:
             raise ValueError("runner must have the Runner role")
+        players_by_id = {
+            self.corp.player_id: self.corp,
+            self.runner.player_id: self.runner,
+        }
+        if any(key != card.instance_id for key, card in self.card_instances.items()):
+            raise ValueError("Card instance registry keys must match instance IDs")
+        deck_positions: dict[UUID, list[int]] = {}
+        for card in self.card_instances.values():
+            if card.owner_id not in players_by_id:
+                raise ValueError("Every card owner must be a player in this game")
+            if card.controller_id is not None and card.controller_id not in players_by_id:
+                raise ValueError("Every card controller must be a player in this game")
+            if card.location.player_id is not None and card.location.player_id not in players_by_id:
+                raise ValueError("Every player-owned card zone must belong to a player in this game")
+            if card.location.server is not None and card.location.server.server_id not in self.servers:
+                raise ValueError("A card cannot be located on a server that does not exist")
+            if card.location.zone is CardZone.DECK:
+                deck_player_id = card.location.player_id
+                deck_position = card.location.deck_position
+                if deck_player_id is None or deck_position is None:
+                    raise ValueError("A deck card needs an owner and a position")
+                deck_positions.setdefault(deck_player_id, []).append(deck_position)
+            host_id = card.location.host_card_instance_id
+            if host_id is not None:
+                host = self.card_instances.get(host_id)
+                if host_id == card.instance_id:
+                    raise ValueError("A card cannot host itself")
+                if host is None or host.location.zone is not CardZone.PLAY_AREA:
+                    raise ValueError("A hosted card must reference a card in the play area")
+
+        for positions in deck_positions.values():
+            if sorted(positions) != list(range(1, len(positions) + 1)):
+                raise ValueError(
+                    "Each player's deck positions must be unique and contiguous from the top"
+                )
+
+        for player in (self.corp, self.runner):
+            identity = self.card_instances.get(player.identity_card_instance_id)
+            if identity is None:
+                raise ValueError("Each player's identity must be present in the game card registry")
+            if identity.owner_id != player.player_id:
+                raise ValueError("A player's identity card must be owned by that player")
+            if identity.definition_id != player.deck_selection.identity_definition_id:
+                raise ValueError("Identity instance must match the selected identity definition")
+            if (
+                identity.location.zone is not CardZone.IDENTITY
+                or identity.location.player_id != player.player_id
+            ):
+                raise ValueError("A player's identity must be in that player's identity zone")
+
+        for card in self.card_instances.values():
+            if card.location.zone is CardZone.IDENTITY:
+                identity_owner = players_by_id[card.owner_id]
+                if card.instance_id != identity_owner.identity_card_instance_id:
+                    raise ValueError(
+                        "Each player can have only their selected identity in the identity zone"
+                    )
+
         if len(self.servers) != len(set(self.servers)):
             raise ValueError("Server IDs must be unique")
         present_central_servers = {

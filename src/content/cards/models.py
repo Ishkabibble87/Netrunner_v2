@@ -37,7 +37,7 @@ class CardDefinition(CardContentModel):
 
     definition_id: str = Field(
         min_length=1,
-        description="Stable content ID, distinct from set printing codes and game instance IDs",
+        description="Unique card code from the NSG card data, distinct from game instance IDs",
     )
     title: str = Field(min_length=1)
     side: CardSide
@@ -55,6 +55,8 @@ class CardDefinition(CardContentModel):
     agenda_points: int | None = Field(default=None, ge=0)
     strength: int | None = Field(default=None, ge=0)
     memory_cost: int | None = Field(default=None, ge=0)
+    influence_cost: int | None = Field(default=None, ge=0)
+    deck_limit: int | None = Field(default=None, ge=0)
     base_link: int | None = Field(default=None, ge=0)
     minimum_deck_size: int | None = Field(default=None, ge=0)
     influence_limit: int | None = Field(default=None, ge=0)

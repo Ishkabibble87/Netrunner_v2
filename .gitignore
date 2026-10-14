@@ -3,3 +3,5 @@
 /prototypes/**
 !/prototypes/.gitkeep
 /rules/**
+__pycache__/
+*.py[cod]
