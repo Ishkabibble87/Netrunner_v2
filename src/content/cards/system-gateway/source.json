@@ -1,0 +1,11 @@
+{
+  "repository": "https://github.com/Null-Signal-Games/netrunner-cards-json",
+  "revision": "69a34d7d425d08a785f64e508ac0f05019e11ad9",
+  "cards_url": "https://raw.githubusercontent.com/Null-Signal-Games/netrunner-cards-json/69a34d7d425d08a785f64e508ac0f05019e11ad9/pack/sg.json",
+  "packs_url": "https://raw.githubusercontent.com/Null-Signal-Games/netrunner-cards-json/69a34d7d425d08a785f64e508ac0f05019e11ad9/packs.json",
+  "retrieved_date": "2026-10-10",
+  "edition": "System Gateway – Remastered Edition",
+  "product_url": "https://nullsignal.games/products/system-gateway/",
+  "images_url_template": "https://card-images.netrunnerdb.com/v2/large/{code}.jpg",
+  "note": "Current upstream rules text and errata; definitions are reference data, not implemented engine behavior. Image endpoint is shared across editions; remastered faces are verified separately."
+}
