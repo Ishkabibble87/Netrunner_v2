@@ -59,6 +59,15 @@ Treat this as a planning map; refine it as game flow is implemented.
 - Keep these internal facts and timing records separate from outbound client messages. Socket messages are player-specific views of state changes, events, and prompts.
 - Card text is for display; rules execution should use structured ability definitions or explicit Python handlers, not depend on parsing prose at runtime.
 
+### Deck import
+
+NetrunnerDB text-file exports can be imported into `DeckSelection` through
+`src/content/decks/deck_importer.py`. The CLI should let
+the player select a file and send its contents through the setup API. Keep file
+import separate from deck legality, implemented-card checks, and creating
+in-game card copies. Both System Gateway starter exports are tracked under
+`src/content/decks/system-gateway/`.
+
 ## Provisional API surface
 
 Use HTTP for game setup and snapshots, and a WebSocket for live commands and updates. Route and message names can change as the CLI drives the design.

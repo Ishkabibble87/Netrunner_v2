@@ -35,3 +35,4 @@ rules/
 ## Behavior
 
 - **Keep answers succinct**, I will ignore long replies and ask you to repeat it using less techinical terms.
+- Do not add new documentation files unless explicitly asked.
