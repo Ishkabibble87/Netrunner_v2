@@ -1,0 +1,5 @@
+/assets/**
+!/assets/.gitkeep
+/prototypes/**
+!/prototypes/.gitkeep
+/rules/**
