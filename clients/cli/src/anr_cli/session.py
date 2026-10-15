@@ -1,11 +1,13 @@
 """Keep a game's WebSocket open while the synchronous inspector is running."""
 
 import json
+from queue import Empty, Queue
 from threading import Event, Lock, Thread
 from time import monotonic
 from types import TracebackType
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
+from uuid import uuid4
 
 from websockets.exceptions import ConnectionClosed, InvalidStatus, WebSocketException
 from websockets.sync.client import ClientConnection, connect
@@ -13,6 +15,14 @@ from websockets.sync.client import ClientConnection, connect
 
 class SessionConnectionError(Exception):
     """A game session could not be connected or resumed."""
+
+
+class SessionCommandRejected(SessionConnectionError):
+    """The game engine rejected a player command."""
+
+    def __init__(self, detail: str, state: dict[str, Any] | None = None) -> None:
+        super().__init__(detail)
+        self.state = state
 
 
 class SessionConnection:
@@ -40,10 +50,13 @@ class SessionConnection:
         self.reconnect_timeout_seconds = reconnect_timeout_seconds
         self.retry_interval_seconds = retry_interval_seconds
         self.initial_state: dict[str, Any] = {}
+        self.revision = 0
         self.status = "Connecting"
         self.error: str | None = None
         self._stop = Event()
         self._lock = Lock()
+        self._command_lock = Lock()
+        self._messages: Queue[dict[str, Any]] = Queue()
         self._socket: ClientConnection | None = None
         self._thread: Thread | None = None
 
@@ -73,6 +86,7 @@ class SessionConnection:
     def __enter__(self) -> "SessionConnection":
         try:
             self._socket, self.initial_state = self._open()
+            self.revision = int(self.initial_state.get("revision", 0))
         except (OSError, TimeoutError, WebSocketException, ValueError) as error:
             raise SessionConnectionError(f"Could not connect to the game session: {error}") from error
         self.status = "Connected"
@@ -83,7 +97,22 @@ class SessionConnection:
     def _listen(self) -> None:
         while not self._stop.is_set():
             try:
-                self._socket.recv()
+                with self._lock:
+                    socket = self._socket
+                if socket is None:
+                    return
+                raw_message = socket.recv()
+                message = json.loads(raw_message)
+                if not isinstance(message, dict):
+                    continue
+                state = message.get("state")
+                if isinstance(state, dict):
+                    with self._lock:
+                        self.initial_state = state
+                        self.revision = int(message.get("revision", state.get("revision", 0)))
+                self._messages.put(message)
+            except json.JSONDecodeError:
+                continue
             except (OSError, WebSocketException) as error:
                 if self._stop.is_set():
                     return
@@ -93,6 +122,49 @@ class SessionConnection:
                     return
                 if not self._reconnect():
                     return
+
+    def submit_action(self, action: str, *, timeout_seconds: float = 10) -> dict[str, Any]:
+        """Send one action and return the authoritative player view."""
+
+        request_id = str(uuid4())
+        with self._command_lock:
+            with self._lock:
+                socket = self._socket
+            if socket is None or self.status != "Connected":
+                raise SessionConnectionError("The game session is not connected")
+            try:
+                socket.send(json.dumps({
+                    "type": "action",
+                    "request_id": request_id,
+                    "action": action,
+                }))
+            except (OSError, WebSocketException) as error:
+                raise SessionConnectionError(f"Could not send the action: {error}") from error
+
+            deadline = monotonic() + timeout_seconds
+            while True:
+                remaining = deadline - monotonic()
+                if remaining <= 0:
+                    raise SessionConnectionError("The game did not respond to the action")
+                try:
+                    message = self._messages.get(timeout=remaining)
+                except Empty as error:
+                    raise SessionConnectionError(
+                        "The game did not respond to the action"
+                    ) from error
+                if message.get("request_id") != request_id:
+                    continue
+                if message.get("type") == "action_rejected":
+                    rejected_state = message.get("state")
+                    raise SessionCommandRejected(
+                        str(message.get("detail", "Action rejected")),
+                        rejected_state if isinstance(rejected_state, dict) else None,
+                    )
+                if message.get("type") != "action_result" or not isinstance(
+                    message.get("state"), dict
+                ):
+                    raise SessionConnectionError("The API returned an invalid action result")
+                return message["state"]
 
     def _reconnect(self) -> bool:
         self.status = "Disconnected: reconnecting"
@@ -117,6 +189,7 @@ class SessionConnection:
                         return False
                     self._socket = socket
                     self.initial_state = state
+                    self.revision = int(state.get("revision", 0))
                 self.status = "Connected"
                 return True
         if not self._stop.is_set():

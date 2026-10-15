@@ -203,6 +203,7 @@ def play_ai(api_url: str) -> None:
                 connection.initial_state,
                 catalog_by_id,
                 connection_status=lambda: connection.status,
+                action_callback=connection.submit_action,
             ).run()
         if connection.error is not None:
             console.print(connection.error, style="red")

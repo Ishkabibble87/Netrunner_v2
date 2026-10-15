@@ -28,6 +28,10 @@ class TurnPhase(StrEnum):
     DISCARD = "discard"
 
 
+class GameEndReason(StrEnum):
+    DECKED_OUT = "decked_out"
+
+
 class CardZone(StrEnum):
     """Zones that can contain cards (the bank contains counters, never cards)."""
 
@@ -236,6 +240,11 @@ class TurnState(DomainModel):
         return self
 
 
+class GameOutcome(DomainModel):
+    winner: PlayerRole
+    reason: GameEndReason
+
+
 class GameState(DomainModel):
     """Authoritative state for a game that has started."""
 
@@ -243,6 +252,7 @@ class GameState(DomainModel):
     corp: PlayerState
     runner: PlayerState
     turn: TurnState
+    outcome: GameOutcome | None = None
     servers: list[ServerId] = Field(default_factory=lambda: list(CentralServer))
     card_instances: dict[UUID, CardInstance] = Field(default_factory=dict)
 

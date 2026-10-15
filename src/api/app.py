@@ -1,6 +1,7 @@
-"""HTTP API for creating an initial game against a selected AI profile."""
+"""HTTP and WebSocket API for starting and playing in-memory games."""
 
 import asyncio
+import json
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import Annotated, Mapping
@@ -17,6 +18,7 @@ from fastapi import (
     status,
 )
 from fastapi.responses import JSONResponse
+from pydantic import ValidationError
 
 from application.game_setup import GameSetupError, create_ai_game
 from application.sessions import SessionAccessDenied, SessionNotFound, SessionStore
@@ -27,6 +29,7 @@ from content.decks.loader import load_preconstructed_decks
 from content.decks.models import PreconstructedDeck
 from content.opponents.loader import load_opponent_profiles
 from content.opponents.models import OpponentProfile
+from game.engine import GameRuleError, begin_initial_turn
 from game.models import DeckSelection
 
 from .schemas import (
@@ -38,6 +41,9 @@ from .schemas import (
     OpponentProfileSummary,
     PreconstructedDeckResponse,
     SessionSnapshot,
+    WebSocketAction,
+    WebSocketActionRejected,
+    WebSocketActionResult,
 )
 
 
@@ -160,6 +166,7 @@ def create_app(
             )
         except GameSetupError as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
+        begin_initial_turn(game_state)
         initial_state = InitialGameView.from_game_state(
             game_state,
             request.player_id,
@@ -178,8 +185,10 @@ def create_app(
         game_id: UUID,
         token: Annotated[str, Depends(player_token)],
     ) -> InitialGameView:
-        session, player_id = sessions.get(game_id, token)
-        return InitialGameView.from_game_state(session.state, player_id, definitions)
+        state, player_id, revision = sessions.snapshot(game_id, token)
+        return InitialGameView.from_game_state(
+            state, player_id, definitions, revision=revision
+        )
 
     @api.post("/games/{game_id}/leave", status_code=status.HTTP_204_NO_CONTENT)
     async def leave_game(game_id: UUID, token: Annotated[str, Depends(player_token)]) -> None:
@@ -202,16 +211,85 @@ def create_app(
         try:
             await websocket.accept()
             # The session may have expired or been left while accepting the socket.
-            session, player_id, connection_id = sessions.connect(game_id, token)
+            _, player_id, connection_id = sessions.connect(game_id, token)
             sockets[connection_id] = websocket
+            state, player_id, revision = sessions.snapshot(game_id, token)
             snapshot = SessionSnapshot(
-                state=InitialGameView.from_game_state(session.state, player_id, definitions)
+                revision=revision,
+                state=InitialGameView.from_game_state(
+                    state, player_id, definitions, revision=revision
+                ),
             )
             await websocket.send_json(snapshot.model_dump(mode="json"))
-            # Uvicorn's websockets backend detects silent failures with protocol pings.
-            # No game commands are implemented yet; inspection stays local to the client.
-            while True:
-                await websocket.receive_text()
+            async for message in websocket.iter_text():
+                try:
+                    command = WebSocketAction.model_validate_json(message)
+                except ValidationError:
+                    try:
+                        raw = json.loads(message)
+                        request_id = UUID(raw["request_id"]) if isinstance(raw, dict) else None
+                    except (json.JSONDecodeError, KeyError, TypeError, ValueError):
+                        request_id = None
+                    state, player_id, revision = sessions.snapshot(game_id, token)
+                    await websocket.send_json(
+                        WebSocketActionRejected(
+                            request_id=request_id,
+                            detail="Invalid action command",
+                            revision=revision,
+                            state=InitialGameView.from_game_state(
+                                state,
+                                player_id,
+                                definitions,
+                                revision=revision,
+                            ),
+                        ).model_dump(mode="json")
+                    )
+                    continue
+
+                try:
+                    state, player_id, revision = sessions.apply_action(
+                        game_id, token, command.action
+                    )
+                except GameRuleError as error:
+                    state, player_id, revision = sessions.snapshot(game_id, token)
+                    await websocket.send_json(
+                        WebSocketActionRejected(
+                            request_id=command.request_id,
+                            detail=str(error),
+                            revision=revision,
+                            state=InitialGameView.from_game_state(
+                                state,
+                                player_id,
+                                definitions,
+                                revision=revision,
+                            ),
+                        ).model_dump(mode="json")
+                    )
+                    continue
+
+                connected_players = sessions.connections_for(game_id)
+                for recipient_connection_id, recipient_player_id in connected_players.items():
+                    recipient = sockets.get(recipient_connection_id)
+                    if recipient is None:
+                        continue
+                    recipient_view = InitialGameView.from_game_state(
+                        state,
+                        recipient_player_id,
+                        definitions,
+                        revision=revision,
+                    )
+                    if recipient_connection_id == connection_id:
+                        update = WebSocketActionResult(
+                            request_id=command.request_id,
+                            revision=revision,
+                            state=recipient_view,
+                        )
+                    else:
+                        update = SessionSnapshot(
+                            revision=revision,
+                            state=recipient_view,
+                        )
+                    await recipient.send_json(update.model_dump(mode="json"))
         except WebSocketDisconnect:
             pass
         except (SessionNotFound, SessionAccessDenied):
