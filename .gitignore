@@ -5,3 +5,4 @@
 /rules/**
 __pycache__/
 *.py[cod]
+*.egg-info/

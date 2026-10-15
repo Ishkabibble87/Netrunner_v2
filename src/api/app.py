@@ -13,6 +13,7 @@ from content.opponents.models import OpponentProfile
 
 from .schemas import (
     CreateGameRequest,
+    CardCatalogEntry,
     GameCreatedResponse,
     InitialGameView,
     OpponentProfileSummary,
@@ -48,6 +49,13 @@ def create_app(
         return [
             OpponentProfileSummary.from_profile(profile)
             for profile in api.state.opponent_profiles.values()
+        ]
+
+    @api.get("/card-catalog", response_model=list[CardCatalogEntry])
+    def list_card_catalog() -> list[CardCatalogEntry]:
+        return [
+            CardCatalogEntry.from_definition(definition)
+            for definition in api.state.card_definitions.values()
         ]
 
     @api.post(

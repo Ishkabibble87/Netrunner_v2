@@ -5,7 +5,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from content.cards.models import CardDefinition, CardType
+from content.cards.models import CardDefinition, CardSide, CardType
 from content.opponents.models import OpponentProfile
 from game.models import CardZone, DeckSelection, GameState, PlayerRole, PlayerState
 
@@ -146,3 +146,19 @@ class OpponentProfileSummary(ApiModel):
     @classmethod
     def from_profile(cls, profile: OpponentProfile) -> "OpponentProfileSummary":
         return cls(profile_id=profile.profile_id, name=profile.name)
+
+
+class CardCatalogEntry(ApiModel):
+    definition_id: str
+    title: str
+    side: CardSide
+    card_type: CardType
+
+    @classmethod
+    def from_definition(cls, definition: CardDefinition) -> "CardCatalogEntry":
+        return cls(
+            definition_id=definition.definition_id,
+            title=definition.title,
+            side=definition.side,
+            card_type=definition.card_type,
+        )
