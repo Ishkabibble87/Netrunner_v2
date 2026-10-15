@@ -1,0 +1,8 @@
+{
+  "profile_id": "system-gateway-training",
+  "name": "System Gateway Training Opponent",
+  "decks": {
+    "corp": "../../decks/system-gateway/starter-corp.txt",
+    "runner": "../../decks/system-gateway/starter-runner.txt"
+  }
+}
