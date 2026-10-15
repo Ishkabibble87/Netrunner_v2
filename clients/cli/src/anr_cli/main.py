@@ -1,4 +1,4 @@
-"""Interactive CLI for creating and inspecting games through the HTTP API."""
+"""Interactive CLI for creating and inspecting games through the game API."""
 
 import json
 from pathlib import Path
@@ -20,6 +20,7 @@ from rich.prompt import Prompt
 
 from .game_ui import GameScreen
 from .navigation import navigation_bindings
+from .session import SessionConnection, SessionConnectionError
 from .terminal import get_terminal_input
 
 
@@ -31,19 +32,28 @@ class ApiError(Exception):
     """The game API could not complete a request."""
 
 
-def request_json(api_url: str, path: str, payload: dict[str, Any] | None = None) -> Any:
+def request_json(
+    api_url: str,
+    path: str,
+    payload: dict[str, Any] | None = None,
+    *,
+    player_token: str | None = None,
+) -> Any:
     data = json.dumps(payload).encode("utf-8") if payload is not None else None
     request = Request(
         f"{api_url.rstrip('/')}{path}",
         data=data,
         headers={
             "Accept": "application/json",
+            **({"Authorization": f"Bearer {player_token}"} if player_token is not None else {}),
             **({"Content-Type": "application/json"} if data is not None else {}),
         },
         method="POST" if data is not None else "GET",
     )
     try:
         with urlopen(request, timeout=15) as response:
+            if response.status == 204:
+                return None
             return json.loads(response.read().decode("utf-8"))
     except HTTPError as error:
         body = error.read().decode("utf-8", errors="replace")
@@ -167,7 +177,11 @@ def play_ai(api_url: str) -> None:
         return
 
     initial_state = response.get("initial_state") if isinstance(response, dict) else None
-    if not isinstance(initial_state, dict) or "game_id" not in initial_state:
+    if (
+        not isinstance(initial_state, dict)
+        or "game_id" not in initial_state
+        or not isinstance(response.get("player_token"), str)
+    ):
         console.print("[red]The API returned an unexpected game response.[/red]")
         return
 
@@ -176,7 +190,29 @@ def play_ai(api_url: str) -> None:
         for entry in card_catalog
         if isinstance(entry, dict) and "definition_id" in entry
     }
-    GameScreen(initial_state, catalog_by_id).run()
+    game_id = initial_state["game_id"]
+    player_token = response["player_token"]
+    try:
+        with SessionConnection(
+            api_url,
+            game_id,
+            player_token,
+            reconnect_timeout_seconds=response["reconnect_timeout_seconds"],
+        ) as connection:
+            GameScreen(
+                connection.initial_state,
+                catalog_by_id,
+                connection_status=lambda: connection.status,
+            ).run()
+        if connection.error is not None:
+            console.print(connection.error, style="red")
+    except SessionConnectionError as error:
+        console.print(str(error), style="red")
+    finally:
+        try:
+            request_json(api_url, f"/games/{game_id}/leave", {}, player_token=player_token)
+        except ApiError:
+            console.print("Could not notify the API of exit; the session will expire automatically.", style="yellow")
 
 
 def new_game_menu(api_url: str) -> None:
