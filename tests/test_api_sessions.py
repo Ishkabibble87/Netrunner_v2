@@ -19,7 +19,9 @@ class SessionApiTests(unittest.TestCase):
         self.client = self.enterContext(TestClient(create_app(
             session_store=self.store, cleanup_interval_seconds=0.01,
         )))
-        deck = self.client.get("/preconstructed-decks").json()[0]["decklist"]
+        decks = self.client.get("/preconstructed-decks").json()
+        corp_deck = next(deck for deck in decks if deck["role"] == "corp")
+        deck = corp_deck["decklist"]
         response = self.client.post("/games", json={
             "player_id": str(uuid4()),
             "decklist": deck,
@@ -41,11 +43,73 @@ class SessionApiTests(unittest.TestCase):
             message = socket.receive_json()
             self.assertEqual(message["type"], "state")
             self.assertEqual(message["revision"], 0)
-            self.assertEqual(len(message["state"]["you"]["hand"]), 5)
+            self.assertEqual(message["state"]["turn"]["phase"], "action")
+            self.assertEqual(message["state"]["you"]["clicks_remaining"], 3)
+            self.assertEqual(len(message["state"]["you"]["hand"]), 6)
+            self.assertEqual(message["state"]["legal_actions"], ["gain_credit", "draw_card"])
             self.assertNotIn("hand", message["state"]["opponent"])
             self.assertNotIn("player_token", message["state"])
             self.now += 3600
             self.assertEqual(self.store.remove_expired(), 0)
+
+    def test_websocket_action_updates_view_and_revision(self):
+        request_id = str(uuid4())
+        with self.client.websocket_connect(f"{self.path}/events", headers=self.headers) as socket:
+            socket.receive_json()
+            socket.send_json({
+                "type": "action",
+                "request_id": request_id,
+                "action": "gain_credit",
+            })
+            result = socket.receive_json()
+
+        self.assertEqual(result["type"], "action_result")
+        self.assertEqual(result["request_id"], request_id)
+        self.assertEqual(result["revision"], 1)
+        self.assertEqual(result["state"]["revision"], 1)
+        self.assertEqual(result["state"]["you"]["credits"], 6)
+        self.assertEqual(result["state"]["you"]["clicks_remaining"], 2)
+        self.assertEqual(
+            self.client.get(f"{self.path}/state", headers=self.headers).json(),
+            result["state"],
+        )
+
+    def test_rejected_action_does_not_spend_credits_or_advance_revision(self):
+        session, _ = self.store.get(UUID(self.game_id), self.token)
+        session.state.corp.clicks_remaining = 0
+        request_id = str(uuid4())
+        with self.client.websocket_connect(f"{self.path}/events", headers=self.headers) as socket:
+            socket.receive_json()
+            socket.send_json({
+                "type": "action",
+                "request_id": request_id,
+                "action": "gain_credit",
+            })
+            rejected = socket.receive_json()
+
+        self.assertEqual(rejected["type"], "action_rejected")
+        self.assertEqual(rejected["request_id"], request_id)
+        self.assertIn("click", rejected["detail"])
+        self.assertEqual(rejected["revision"], 0)
+        self.assertEqual(rejected["state"]["you"]["credits"], 5)
+        self.assertEqual(rejected["state"]["you"]["clicks_remaining"], 0)
+
+    def test_unknown_action_is_rejected_without_changing_state(self):
+        request_id = str(uuid4())
+        with self.client.websocket_connect(f"{self.path}/events", headers=self.headers) as socket:
+            socket.receive_json()
+            socket.send_json({
+                "type": "action",
+                "request_id": request_id,
+                "action": "unknown_action",
+            })
+            rejected = socket.receive_json()
+
+        self.assertEqual(rejected["type"], "action_rejected")
+        self.assertEqual(rejected["request_id"], request_id)
+        self.assertEqual(rejected["revision"], 0)
+        self.assertEqual(rejected["state"]["you"]["credits"], 5)
+        self.assertEqual(rejected["state"]["you"]["clicks_remaining"], 3)
 
     def test_reconnect_restores_same_game_and_old_disconnect_cannot_remove_it(self):
         with self.client.websocket_connect(f"{self.path}/events", headers=self.headers) as old:

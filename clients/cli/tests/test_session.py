@@ -9,8 +9,9 @@ from unittest.mock import MagicMock, patch
 from websockets.exceptions import ConnectionClosed
 from websockets.sync.server import serve
 
+from anr_cli.game_ui import GameScreen
 from anr_cli.main import play_ai, request_json
-from anr_cli.session import SessionConnection, SessionConnectionError
+from anr_cli.session import SessionCommandRejected, SessionConnection, SessionConnectionError
 
 
 class SessionConnectionTests(unittest.TestCase):
@@ -114,6 +115,99 @@ class SessionConnectionTests(unittest.TestCase):
             with SessionConnection(url, "game", "private-token"):
                 self.fail("An invalid snapshot should not enter the inspector")
         self.assertTrue(closed.wait(timeout=2))
+
+    def test_basic_action_round_trip_returns_updated_player_view(self):
+        received = []
+
+        def handler(socket):
+            self.send_snapshot(socket)
+            command = json.loads(socket.recv())
+            received.append(command)
+            socket.send(json.dumps({
+                "type": "action_result",
+                "request_id": command["request_id"],
+                "revision": 1,
+                "state": {"game_id": "game", "you": {"credits": 6}},
+            }))
+            self.wait_for_close(socket)
+
+        url = self.start_server(handler)
+        with SessionConnection(url, "game", "private-token") as connection:
+            state = connection.submit_action("gain_credit")
+
+        self.assertEqual(received[0]["type"], "action")
+        self.assertEqual(received[0]["action"], "gain_credit")
+        self.assertEqual(state["you"]["credits"], 6)
+        self.assertEqual(connection.revision, 1)
+
+
+class CliActionMenuTests(unittest.TestCase):
+    def test_action_menu_sends_legal_action_and_replaces_snapshot(self):
+        state = {
+            "game_id": "game",
+            "viewer_role": "corp",
+            "you": {"role": "corp", "credits": 5, "clicks_remaining": 3, "hand": []},
+            "opponent": {"role": "runner", "credits": 5, "clicks_remaining": 0},
+            "turn": {"number": 1, "active_player": "corp", "phase": "action"},
+            "decision_status": "your_turn",
+            "legal_actions": ["gain_credit"],
+            "servers": ["hq", "rd", "archives"],
+        }
+        updated = {
+            **state,
+            "you": {**state["you"], "credits": 6, "clicks_remaining": 2},
+            "legal_actions": ["gain_credit", "draw_card"],
+        }
+        callback = MagicMock(return_value=updated)
+        screen = GameScreen(state, {}, action_callback=callback)
+
+        self.assertEqual(screen.level.choices[0].kind, "actions")
+        screen._activate()
+        self.assertEqual(screen.level.kind, "actions")
+        self.assertEqual(screen.level.choices[0].label, "Gain 1 credit")
+        screen._activate()
+
+        callback.assert_called_once_with("gain_credit")
+        self.assertEqual(screen.state["you"]["credits"], 6)
+        self.assertEqual([choice.kind for choice in screen.level.choices], ["actions", "inspect", "exit"])
+
+    def test_rejected_action_refreshes_view_and_displays_reason(self):
+        state = {
+            "viewer_role": "corp",
+            "you": {"role": "corp", "credits": 5, "clicks_remaining": 1, "hand": []},
+            "opponent": {"role": "runner"},
+            "turn": {"number": 1, "active_player": "corp", "phase": "action"},
+            "decision_status": "your_turn",
+            "legal_actions": ["gain_credit"],
+            "servers": [],
+        }
+        latest = {
+            **state,
+            "you": {**state["you"], "clicks_remaining": 0},
+            "legal_actions": [],
+        }
+        callback = MagicMock(side_effect=SessionCommandRejected("No click available", latest))
+        screen = GameScreen(state, {}, action_callback=callback)
+        screen._activate()
+        screen._activate()
+
+        self.assertEqual(screen.state["you"]["clicks_remaining"], 0)
+        self.assertEqual(screen.action_error, "No click available")
+        self.assertEqual([choice.kind for choice in screen.level.choices], ["inspect", "exit"])
+
+    def test_waiting_player_has_no_action_menu(self):
+        state = {
+            "you": {"role": "runner", "hand": []},
+            "opponent": {"role": "corp"},
+            "viewer_role": "runner",
+            "turn": {"active_player": "corp", "phase": "action", "number": 1},
+            "decision_status": "waiting_on_opponent",
+            "legal_actions": [],
+            "servers": [],
+        }
+        screen = GameScreen(state, {})
+
+        self.assertNotIn("actions", [choice.kind for choice in screen.level.choices])
 
 
 class CliSessionLifecycleTests(unittest.TestCase):

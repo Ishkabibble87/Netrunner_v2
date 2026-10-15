@@ -7,6 +7,8 @@ from threading import Lock
 from time import monotonic
 from uuid import UUID, uuid4
 
+from game.commands import BasicAction
+from game.engine import resolve_basic_action
 from game.models import GameState
 
 
@@ -24,6 +26,7 @@ class GameSession:
     opponent_profile_id: str
     player_tokens: dict[UUID, str]
     expires_at: float | None
+    revision: int = 0
     connections: dict[UUID, UUID] = field(default_factory=dict)
 
 
@@ -81,6 +84,33 @@ class SessionStore:
     def get(self, game_id: UUID, token: str) -> tuple[GameSession, UUID]:
         with self._lock:
             return self._authenticated(game_id, token)
+
+    def snapshot(self, game_id: UUID, token: str) -> tuple[GameState, UUID, int]:
+        """Return a consistent state copy for one authenticated player."""
+
+        with self._lock:
+            session, player_id = self._authenticated(game_id, token)
+            return session.state.model_copy(deep=True), player_id, session.revision
+
+    def apply_action(
+        self, game_id: UUID, token: str, action: BasicAction
+    ) -> tuple[GameState, UUID, int]:
+        """Resolve one command atomically and increment the game revision."""
+
+        with self._lock:
+            session, player_id = self._authenticated(game_id, token)
+            resolve_basic_action(session.state, player_id, action)
+            session.revision += 1
+            return session.state.model_copy(deep=True), player_id, session.revision
+
+    def connections_for(self, game_id: UUID) -> dict[UUID, UUID]:
+        """Return a snapshot of connected socket IDs and their player IDs."""
+
+        with self._lock:
+            session = self._sessions.get(game_id)
+            if session is None:
+                return {}
+            return dict(session.connections)
 
     def connect(self, game_id: UUID, token: str) -> tuple[GameSession, UUID, UUID]:
         with self._lock:

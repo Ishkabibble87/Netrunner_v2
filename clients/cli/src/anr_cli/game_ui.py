@@ -1,4 +1,4 @@
-"""Keyboard-driven, read-only game view for the initial API snapshot."""
+"""Keyboard-driven game view with read-only inspection and legal actions."""
 
 from __future__ import annotations
 
@@ -43,7 +43,7 @@ class MenuLevel:
 
 
 class GameScreen:
-    """Show the player-visible initial state with a responsive inspector."""
+    """Show the player-visible state, legal actions, and card inspector."""
 
     wide_columns = 106
 
@@ -53,10 +53,13 @@ class GameScreen:
         card_catalog: dict[str, dict[str, Any]],
         *,
         connection_status: Callable[[], str] | None = None,
+        action_callback: Callable[[str], dict[str, Any]] | None = None,
     ) -> None:
         self.state = state
         self.card_catalog = card_catalog
         self.connection_status = connection_status
+        self.action_callback = action_callback
+        self.action_error: str | None = None
         self.you = state.get("you", {})
         self.opponent = state.get("opponent", {})
         self.viewer_role = str(state.get("viewer_role", self.you.get("role", "")))
@@ -66,10 +69,7 @@ class GameScreen:
             MenuLevel(
                 "Game",
                 "root",
-                [
-                    MenuChoice("Inspect cards · read only", "inspect"),
-                    MenuChoice("Leave game", "exit"),
-                ],
+                self._root_choices(),
             )
         ]
         self.app: Application[None] | None = None
@@ -154,6 +154,7 @@ class GameScreen:
                     "section": "bold ansiyellow",
                     "selected": "reverse bold",
                     "muted": "ansibrightblack",
+                    "error": "ansired",
                     "card-title": "bold ansigreen",
                 }
             ),
@@ -262,6 +263,8 @@ class GameScreen:
         line(self._status_text())
         if self.connection_status is not None:
             line(self.connection_status(), "class:muted")
+        if self.action_error:
+            line(self.action_error, "class:error")
         line()
 
         if self.level.kind == "card":
@@ -269,10 +272,17 @@ class GameScreen:
             return fragments
 
         line("ACTIONS", "class:section")
-        line(
-            "Game actions are unavailable: the API does not yet return legal moves or accept commands.",
-            "class:muted",
-        )
+        legal = self.state.get("legal_actions", [])
+        if legal:
+            for action in legal:
+                line(self._action_label(str(action)), "class:muted")
+        elif self.state.get("decision_status") == "waiting_on_opponent":
+            line("Waiting on the opponent.", "class:muted")
+        elif self.state.get("decision_status") == "game_over":
+            winner = self.state.get("winner", "unknown")
+            line(f"Game over · {str(winner).title()} wins.", "class:muted")
+        else:
+            line("No basic actions are available.", "class:muted")
         line()
         breadcrumb = self._breadcrumb()
         if breadcrumb:
@@ -297,6 +307,18 @@ class GameScreen:
             marker = "> " if index == self.level.selected else "  "
             line(f"{marker}{choice.label}", style)
         return fragments
+
+    def _root_choices(self) -> list[MenuChoice]:
+        choices: list[MenuChoice] = []
+        if self.state.get("legal_actions"):
+            choices.append(MenuChoice("Take a basic action", "actions"))
+        choices.extend(
+            [
+                MenuChoice("Inspect cards · read only", "inspect"),
+                MenuChoice("Leave game", "exit"),
+            ]
+        )
+        return choices
 
     def _append_card_detail(
         self,
@@ -368,6 +390,9 @@ class GameScreen:
         return [self._server_label(server) for server in self.state.get("servers", [])]
 
     def _status_text(self) -> str:
+        if self.state.get("decision_status") == "game_over":
+            winner = str(self.state.get("winner", "unknown")).title()
+            return f"Game over · {winner} wins"
         turn = self.state.get("turn", {})
         active = str(turn.get("active_player", "unknown"))
         phase = str(turn.get("phase", "unknown")).replace("_", " ")
@@ -419,6 +444,36 @@ class GameScreen:
                 self.app.exit()
         elif choice.kind == "back":
             self._back()
+        elif choice.kind == "actions":
+            actions = self.state.get("legal_actions", [])
+            self._push(
+                MenuLevel(
+                    "Basic actions",
+                    "actions",
+                    [
+                        MenuChoice(self._action_label(str(action)), "action", str(action))
+                        for action in actions
+                    ]
+                    + [MenuChoice("Back", "back")],
+                )
+            )
+        elif choice.kind == "action":
+            if self.action_callback is None:
+                self.action_error = "Game commands are unavailable in this session."
+            else:
+                try:
+                    self._replace_state(self.action_callback(str(choice.value)))
+                    self.action_error = None
+                except Exception as error:
+                    updated_state = getattr(error, "state", None)
+                    if isinstance(updated_state, dict):
+                        self._replace_state(updated_state)
+                    self.action_error = str(error)
+            if len(self.levels) > 1:
+                self.levels.pop()
+            self.levels[0].choices = self._root_choices()
+            self._reset_menu_scroll()
+            self._invalidate()
         elif choice.kind == "inspect":
             corp, runner = self._players_by_role()
             corp_identity = corp.get("identity", {})
@@ -536,6 +591,20 @@ class GameScreen:
     def _invalidate(self) -> None:
         if self.app is not None:
             self.app.invalidate()
+
+    def _replace_state(self, state: dict[str, Any]) -> None:
+        self.state = state
+        self.you = state.get("you", {})
+        self.opponent = state.get("opponent", {})
+        self.viewer_role = str(state.get("viewer_role", self.you.get("role", "")))
+        self.hand = self.you.get("hand", [])
+
+    @staticmethod
+    def _action_label(action: str) -> str:
+        return {
+            "gain_credit": "Gain 1 credit",
+            "draw_card": "Draw 1 card",
+        }.get(action, action.replace("_", " ").title())
 
     @staticmethod
     def _server_label(server: Any) -> str:

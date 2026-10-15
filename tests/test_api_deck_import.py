@@ -38,7 +38,7 @@ class DeckImportApiTests(unittest.TestCase):
                 self.assertEqual(response.status_code, 201)
                 view = response.json()["initial_state"]
                 self.assertEqual(view["viewer_role"], side)
-                self.assertEqual(len(view["you"]["hand"]), 5)
+                self.assertEqual(len(view["you"]["hand"]), 6 if side == "corp" else 5)
                 self.assertNotIn("hand", view["opponent"])
 
     def test_bad_exports_return_parser_errors(self):

@@ -9,7 +9,16 @@ from pydantic import BaseModel, ConfigDict, Field
 from content.cards.models import CardDefinition, CardSide, CardType
 from content.decks.models import PreconstructedDeck
 from content.opponents.models import OpponentProfile
-from game.models import CardZone, DeckSelection, GameState, PlayerRole, PlayerState
+from game.commands import BasicAction
+from game.engine import legal_actions
+from game.models import (
+    CardZone,
+    DeckSelection,
+    GameEndReason,
+    GameState,
+    PlayerRole,
+    PlayerState,
+)
 
 
 class ApiModel(BaseModel):
@@ -57,12 +66,17 @@ class OpponentView(PlayerSummary):
 
 
 class InitialGameView(ApiModel):
-    """Initial state projection for one player; concealed cards stay hidden."""
+    """Current player-specific projection; concealed cards stay hidden."""
 
     game_id: UUID
     viewer_player_id: UUID
     viewer_role: PlayerRole
     turn: TurnView
+    revision: int = 0
+    decision_status: Literal["your_turn", "waiting_on_opponent", "game_over"]
+    legal_actions: list[BasicAction] = Field(default_factory=list)
+    winner: PlayerRole | None = None
+    end_reason: GameEndReason | None = None
     you: OwnPlayerView
     opponent: OpponentView
     servers: list[str | int]
@@ -73,6 +87,8 @@ class InitialGameView(ApiModel):
         state: GameState,
         viewer_player_id: UUID,
         card_definitions: Mapping[str, CardDefinition],
+        *,
+        revision: int = 0,
     ) -> "InitialGameView":
         players = (state.corp, state.runner)
         you = next(
@@ -119,6 +135,14 @@ class InitialGameView(ApiModel):
             and card.location.player_id == opponent.player_id
             for card in state.card_instances.values()
         )
+        is_decision_owner = you.role is state.turn.active_player
+        decision_status = (
+            "game_over"
+            if state.outcome is not None
+            else "your_turn"
+            if is_decision_owner
+            else "waiting_on_opponent"
+        )
         return cls(
             game_id=state.game_id,
             viewer_player_id=viewer_player_id,
@@ -128,6 +152,11 @@ class InitialGameView(ApiModel):
                 active_player=state.turn.active_player,
                 phase=state.turn.phase.value,
             ),
+            revision=revision,
+            decision_status=decision_status,
+            legal_actions=legal_actions(state, viewer_player_id),
+            winner=state.outcome.winner if state.outcome is not None else None,
+            end_reason=state.outcome.reason if state.outcome is not None else None,
             you=OwnPlayerView(**player_summary(you).model_dump(), hand=own_hand),
             opponent=OpponentView(
                 **player_summary(opponent).model_dump(),
@@ -150,6 +179,27 @@ class GameCreatedResponse(ApiModel):
 class SessionSnapshot(ApiModel):
     type: Literal["state"] = "state"
     revision: int = 0
+    state: InitialGameView
+
+
+class WebSocketAction(ApiModel):
+    type: Literal["action"] = "action"
+    request_id: UUID
+    action: BasicAction
+
+
+class WebSocketActionResult(ApiModel):
+    type: Literal["action_result"] = "action_result"
+    request_id: UUID
+    revision: int
+    state: InitialGameView
+
+
+class WebSocketActionRejected(ApiModel):
+    type: Literal["action_rejected"] = "action_rejected"
+    request_id: UUID | None = None
+    detail: str
+    revision: int
     state: InitialGameView
 
 
