@@ -8,21 +8,28 @@ from fastapi import FastAPI, HTTPException, status
 from application.game_setup import GameSetupError, create_ai_game
 from content.cards.loader import load_nsg_card_definitions
 from content.cards.models import CardDefinition
+from content.decks.deck_importer import DeckImportError, parse_nrdb_deck
+from content.decks.loader import load_preconstructed_decks
+from content.decks.models import PreconstructedDeck
 from content.opponents.loader import load_opponent_profiles
 from content.opponents.models import OpponentProfile
+from game.models import DeckSelection
 
 from .schemas import (
     CreateGameRequest,
     CardCatalogEntry,
+    DeckImportRequest,
     GameCreatedResponse,
     InitialGameView,
     OpponentProfileSummary,
+    PreconstructedDeckResponse,
 )
 
 
 def create_app(
     card_definitions: Mapping[str, CardDefinition] | None = None,
     opponent_profiles: Mapping[str, OpponentProfile] | None = None,
+    preconstructed_decks: Mapping[str, PreconstructedDeck] | None = None,
 ) -> FastAPI:
     """Create the API app, with optional content injection for embedding."""
 
@@ -35,10 +42,16 @@ def create_app(
         )
     if profiles is None:
         profiles = load_opponent_profiles(definitions)
+    decks = (
+        dict(preconstructed_decks)
+        if preconstructed_decks is not None
+        else load_preconstructed_decks(definitions)
+    )
 
     api = FastAPI(title="Android: Netrunner API", version="0.1.0")
     api.state.card_definitions = definitions
     api.state.opponent_profiles = profiles
+    api.state.preconstructed_decks = decks
 
     @api.get("/health")
     def health() -> dict[str, str]:
@@ -51,12 +64,26 @@ def create_app(
             for profile in api.state.opponent_profiles.values()
         ]
 
+    @api.get("/preconstructed-decks", response_model=list[PreconstructedDeckResponse])
+    def list_preconstructed_decks() -> list[PreconstructedDeckResponse]:
+        return [
+            PreconstructedDeckResponse.from_deck(deck)
+            for deck in api.state.preconstructed_decks.values()
+        ]
+
     @api.get("/card-catalog", response_model=list[CardCatalogEntry])
     def list_card_catalog() -> list[CardCatalogEntry]:
         return [
             CardCatalogEntry.from_definition(definition)
             for definition in api.state.card_definitions.values()
         ]
+
+    @api.post("/decks/import", response_model=DeckSelection)
+    def import_deck(request: DeckImportRequest) -> DeckSelection:
+        try:
+            return parse_nrdb_deck(request.text, api.state.card_definitions)
+        except DeckImportError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
 
     @api.post(
         "/games",

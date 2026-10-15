@@ -6,6 +6,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 from content.cards.models import CardDefinition, CardSide, CardType
+from content.decks.models import PreconstructedDeck
 from content.opponents.models import OpponentProfile
 from game.models import CardZone, DeckSelection, GameState, PlayerRole, PlayerState
 
@@ -18,6 +19,10 @@ class CreateGameRequest(ApiModel):
     player_id: UUID
     decklist: DeckSelection
     opponent_profile_id: str = Field(min_length=1)
+
+
+class DeckImportRequest(ApiModel):
+    text: str
 
 
 class CardView(ApiModel):
@@ -148,17 +153,42 @@ class OpponentProfileSummary(ApiModel):
         return cls(profile_id=profile.profile_id, name=profile.name)
 
 
+class PreconstructedDeckResponse(ApiModel):
+    deck_id: str
+    name: str
+    role: PlayerRole
+    decklist: DeckSelection
+
+    @classmethod
+    def from_deck(cls, deck: PreconstructedDeck) -> "PreconstructedDeckResponse":
+        return cls(**deck.model_dump())
+
+
 class CardCatalogEntry(ApiModel):
     definition_id: str
     title: str
     side: CardSide
     card_type: CardType
+    faction_code: str
+    subtypes: tuple[str, ...]
+    printed_text: str
+    is_unique: bool
+    play_cost: int | None
+    install_cost: int | None
+    rez_cost: int | None
+    trash_cost: int | None
+    advancement_requirement: int | None
+    agenda_points: int | None
+    strength: int | None
+    memory_cost: int | None
+    influence_cost: int | None
+    deck_limit: int | None
+    base_link: int | None
+    minimum_deck_size: int | None
+    influence_limit: int | None
+    flavor_text: str | None
+    illustrator: str | None
 
     @classmethod
     def from_definition(cls, definition: CardDefinition) -> "CardCatalogEntry":
-        return cls(
-            definition_id=definition.definition_id,
-            title=definition.title,
-            side=definition.side,
-            card_type=definition.card_type,
-        )
+        return cls(**definition.model_dump())
