@@ -1,11 +1,25 @@
 """HTTP API for creating an initial game against a selected AI profile."""
 
+import asyncio
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
-from typing import Mapping
+from typing import Annotated, Mapping
+from uuid import UUID
 
-from fastapi import FastAPI, HTTPException, status
+from fastapi import (
+    Depends,
+    FastAPI,
+    Header,
+    HTTPException,
+    Request,
+    WebSocket,
+    WebSocketDisconnect,
+    status,
+)
+from fastapi.responses import JSONResponse
 
 from application.game_setup import GameSetupError, create_ai_game
+from application.sessions import SessionAccessDenied, SessionNotFound, SessionStore
 from content.cards.loader import load_nsg_card_definitions
 from content.cards.models import CardDefinition
 from content.decks.deck_importer import DeckImportError, parse_nrdb_deck
@@ -23,6 +37,7 @@ from .schemas import (
     InitialGameView,
     OpponentProfileSummary,
     PreconstructedDeckResponse,
+    SessionSnapshot,
 )
 
 
@@ -30,6 +45,9 @@ def create_app(
     card_definitions: Mapping[str, CardDefinition] | None = None,
     opponent_profiles: Mapping[str, OpponentProfile] | None = None,
     preconstructed_decks: Mapping[str, PreconstructedDeck] | None = None,
+    *,
+    session_store: SessionStore | None = None,
+    cleanup_interval_seconds: float = 10,
 ) -> FastAPI:
     """Create the API app, with optional content injection for embedding."""
 
@@ -48,10 +66,46 @@ def create_app(
         else load_preconstructed_decks(definitions)
     )
 
-    api = FastAPI(title="Android: Netrunner API", version="0.1.0")
+    if cleanup_interval_seconds <= 0:
+        raise ValueError("The cleanup interval must be positive")
+    sessions = session_store if session_store is not None else SessionStore()
+    sockets: dict[UUID, WebSocket] = {}
+
+    async def cleanup_sessions() -> None:
+        while True:
+            await asyncio.sleep(cleanup_interval_seconds)
+            sessions.remove_expired()
+
+    @asynccontextmanager
+    async def lifespan(api: FastAPI):
+        cleanup = asyncio.create_task(cleanup_sessions())
+        try:
+            yield
+        finally:
+            cleanup.cancel()
+            with suppress(asyncio.CancelledError):
+                await cleanup
+            sessions.clear()
+
+    api = FastAPI(title="Android: Netrunner API", version="0.1.0", lifespan=lifespan)
     api.state.card_definitions = definitions
     api.state.opponent_profiles = profiles
     api.state.preconstructed_decks = decks
+    api.state.sessions = sessions
+
+    @api.exception_handler(SessionNotFound)
+    async def missing_session(request: Request, error: SessionNotFound) -> JSONResponse:
+        return JSONResponse(status_code=404, content={"detail": str(error)})
+
+    @api.exception_handler(SessionAccessDenied)
+    async def denied_session(request: Request, error: SessionAccessDenied) -> JSONResponse:
+        return JSONResponse(status_code=403, content={"detail": str(error)})
+
+    def player_token(authorization: str | None = Header(default=None)) -> str:
+        scheme, _, token = (authorization or "").partition(" ")
+        if scheme.lower() != "bearer" or not token:
+            raise HTTPException(status_code=401, detail="A player session token is required")
+        return token
 
     @api.get("/health")
     def health() -> dict[str, str]:
@@ -104,17 +158,68 @@ def create_app(
                 opponent_profile=profile,
                 card_definitions=api.state.card_definitions,
             )
-            initial_state = InitialGameView.from_game_state(
-                game_state,
-                request.player_id,
-                api.state.card_definitions,
-            )
         except GameSetupError as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
+        initial_state = InitialGameView.from_game_state(
+            game_state,
+            request.player_id,
+            api.state.card_definitions,
+        )
+        session = sessions.create(game_state, profile.profile_id, [request.player_id])
         return GameCreatedResponse(
             opponent_profile_id=profile.profile_id,
+            player_token=session.player_tokens[request.player_id],
+            reconnect_timeout_seconds=sessions.reconnect_timeout_seconds,
             initial_state=initial_state,
         )
+
+    @api.get("/games/{game_id}/state", response_model=InitialGameView)
+    def game_snapshot(
+        game_id: UUID,
+        token: Annotated[str, Depends(player_token)],
+    ) -> InitialGameView:
+        session, player_id = sessions.get(game_id, token)
+        return InitialGameView.from_game_state(session.state, player_id, definitions)
+
+    @api.post("/games/{game_id}/leave", status_code=status.HTTP_204_NO_CONTENT)
+    async def leave_game(game_id: UUID, token: Annotated[str, Depends(player_token)]) -> None:
+        connection_ids = sessions.leave(game_id, token)
+        for connection_id in connection_ids:
+            socket = sockets.get(connection_id)
+            if socket is not None:
+                with suppress(WebSocketDisconnect):
+                    await socket.close(code=1000, reason="Player left game")
+
+    @api.websocket("/games/{game_id}/events")
+    async def game_events(websocket: WebSocket, game_id: UUID) -> None:
+        try:
+            token = player_token(websocket.headers.get("authorization"))
+            sessions.get(game_id, token)
+        except (HTTPException, SessionNotFound, SessionAccessDenied):
+            await websocket.close(code=1008, reason="Game session unavailable")
+            return
+        connection_id = None
+        try:
+            await websocket.accept()
+            # The session may have expired or been left while accepting the socket.
+            session, player_id, connection_id = sessions.connect(game_id, token)
+            sockets[connection_id] = websocket
+            snapshot = SessionSnapshot(
+                state=InitialGameView.from_game_state(session.state, player_id, definitions)
+            )
+            await websocket.send_json(snapshot.model_dump(mode="json"))
+            # Uvicorn's websockets backend detects silent failures with protocol pings.
+            # No game commands are implemented yet; inspection stays local to the client.
+            while True:
+                await websocket.receive_text()
+        except WebSocketDisconnect:
+            pass
+        except (SessionNotFound, SessionAccessDenied):
+            await websocket.close(code=1008, reason="Game session unavailable")
+        finally:
+            if connection_id is not None:
+                sockets.pop(connection_id, None)
+                sessions.disconnect(game_id, connection_id)
 
     return api
 

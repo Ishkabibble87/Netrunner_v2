@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from html import unescape
 import re
-from typing import Any
+from typing import Any, Callable
 
 from prompt_toolkit.application import Application
 from prompt_toolkit.application.current import get_app
@@ -51,9 +51,12 @@ class GameScreen:
         self,
         state: dict[str, Any],
         card_catalog: dict[str, dict[str, Any]],
+        *,
+        connection_status: Callable[[], str] | None = None,
     ) -> None:
         self.state = state
         self.card_catalog = card_catalog
+        self.connection_status = connection_status
         self.you = state.get("you", {})
         self.opponent = state.get("opponent", {})
         self.viewer_role = str(state.get("viewer_role", self.you.get("role", "")))
@@ -65,7 +68,7 @@ class GameScreen:
                 "root",
                 [
                     MenuChoice("Inspect cards · read only", "inspect"),
-                    MenuChoice("Exit game view", "exit"),
+                    MenuChoice("Leave game", "exit"),
                 ],
             )
         ]
@@ -155,6 +158,7 @@ class GameScreen:
                 }
             ),
             full_screen=True,
+            refresh_interval=1 if self.connection_status is not None else None,
         )
         self.app.run()
 
@@ -256,6 +260,8 @@ class GameScreen:
 
         line("STATUS", "class:section")
         line(self._status_text())
+        if self.connection_status is not None:
+            line(self.connection_status(), "class:muted")
         line()
 
         if self.level.kind == "card":

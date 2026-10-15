@@ -1,6 +1,7 @@
 """HTTP request and player-visible response schemas."""
 
 from collections.abc import Mapping
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -141,7 +142,15 @@ class InitialGameView(ApiModel):
 
 class GameCreatedResponse(ApiModel):
     opponent_profile_id: str
+    player_token: str
+    reconnect_timeout_seconds: float
     initial_state: InitialGameView
+
+
+class SessionSnapshot(ApiModel):
+    type: Literal["state"] = "state"
+    revision: int = 0
+    state: InitialGameView
 
 
 class OpponentProfileSummary(ApiModel):
