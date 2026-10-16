@@ -28,6 +28,18 @@ class TurnPhase(StrEnum):
     DISCARD = "discard"
 
 
+class MulliganDecision(StrEnum):
+    KEEP = "keep"
+    MULLIGAN = "mulligan"
+
+
+class SetupState(DomainModel):
+    """Opening-hand decisions, resolved once per player in Corp-first order."""
+
+    pending_player: PlayerRole | None = PlayerRole.CORP
+    decisions: dict[PlayerRole, MulliganDecision] = Field(default_factory=dict)
+
+
 class CardZone(StrEnum):
     """Zones that can contain cards (the bank contains counters, never cards)."""
 
@@ -237,12 +249,14 @@ class TurnState(DomainModel):
 
 
 class GameState(DomainModel):
-    """Authoritative state for a game that has started."""
+    """Authoritative state from opening-hand decisions through play."""
 
     game_id: UUID
     corp: PlayerState
     runner: PlayerState
-    turn: TurnState
+    setup: SetupState = Field(default_factory=SetupState)
+    turn: TurnState | None = None
+    winner: PlayerRole | None = None
     servers: list[ServerId] = Field(default_factory=lambda: list(CentralServer))
     card_instances: dict[UUID, CardInstance] = Field(default_factory=dict)
 

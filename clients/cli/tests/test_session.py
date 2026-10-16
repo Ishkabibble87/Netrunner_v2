@@ -61,6 +61,26 @@ class SessionConnectionTests(unittest.TestCase):
         self.assertFalse(connection._thread.is_alive())
         self.assertIsNone(connection.error)
 
+    def test_live_snapshots_refresh_state_and_old_http_responses_are_ignored(self):
+        updated = Event()
+
+        def handler(socket):
+            self.send_snapshot(socket)
+            socket.send(json.dumps({
+                "type": "state", "revision": 1,
+                "state": {"game_id": "game", "setup": {"pending_player": None}},
+            }))
+            updated.set()
+            self.wait_for_close(socket)
+
+        url = self.start_server(handler)
+        with SessionConnection(url, "game", "private-token") as connection:
+            self.assertTrue(updated.wait(timeout=2))
+            self.wait_until(lambda: "setup" in connection.latest_state)
+            current = connection.latest_state
+            connection.accept_snapshot({"type": "state", "revision": 0, "state": {"game_id": "game"}})
+            self.assertEqual(connection.latest_state, current)
+
     def test_transient_disconnect_reconnects_without_leaving_inspector(self):
         attempts = []
         resumed = Event()

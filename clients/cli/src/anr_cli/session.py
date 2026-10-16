@@ -40,12 +40,34 @@ class SessionConnection:
         self.reconnect_timeout_seconds = reconnect_timeout_seconds
         self.retry_interval_seconds = retry_interval_seconds
         self.initial_state: dict[str, Any] = {}
+        self._latest_state: dict[str, Any] = {}
+        self._revision = -1
         self.status = "Connecting"
         self.error: str | None = None
         self._stop = Event()
         self._lock = Lock()
         self._socket: ClientConnection | None = None
         self._thread: Thread | None = None
+
+    @property
+    def latest_state(self) -> dict[str, Any]:
+        with self._lock:
+            return self._latest_state
+
+    def accept_snapshot(self, message: dict[str, Any]) -> None:
+        """Accept HTTP or socket snapshots in revision order, including reconnects."""
+        if (
+            not isinstance(message, dict)
+            or message.get("type") != "state"
+            or not isinstance(message.get("state"), dict)
+            or message["state"].get("game_id") != self.game_id
+            or type(message.get("revision")) is not int
+        ):
+            raise ValueError("The API returned an unexpected session snapshot")
+        with self._lock:
+            if message["revision"] >= self._revision:
+                self._latest_state = message["state"]
+                self._revision = message["revision"]
 
     def _open(self) -> tuple[ClientConnection, dict[str, Any]]:
         socket = connect(
@@ -58,13 +80,7 @@ class SessionConnection:
         )
         try:
             message = json.loads(socket.recv(timeout=3))
-            if (
-                not isinstance(message, dict)
-                or message.get("type") != "state"
-                or not isinstance(message.get("state"), dict)
-                or message["state"].get("game_id") != self.game_id
-            ):
-                raise ValueError("The API returned an unexpected session snapshot")
+            self.accept_snapshot(message)
         except (OSError, TimeoutError, WebSocketException, ValueError):
             socket.close()
             raise
@@ -83,7 +99,12 @@ class SessionConnection:
     def _listen(self) -> None:
         while not self._stop.is_set():
             try:
-                self._socket.recv()
+                self.accept_snapshot(json.loads(self._socket.recv()))
+            except ValueError as error:
+                self.error = str(error)
+                self.status = "Disconnected: invalid state"
+                self._socket.close()
+                return
             except (OSError, WebSocketException) as error:
                 if self._stop.is_set():
                     return
