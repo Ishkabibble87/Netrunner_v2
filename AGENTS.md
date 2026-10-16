@@ -3,6 +3,8 @@
 ## How to work
 
 - Keep answers succinct.
+- Always create a dedicated Git worktree before starting a new feature or change.
+- Always start both the API and CLI from the worktree and exercise the affected flow through the running application before considering a change complete. Automated tests supplement this live check; they do not replace it.
 - Work in small, visible steps. For substantial changes, briefly state your understanding and first step, then keep the user oriented about important progress and decisions.
 - Make routine, low-risk choices. Ask when uncertainty could change product behavior, scope, or architecture. When the user is thinking through an idea, help reason about it before turning it into code.
 - Keep scope deliberate. Prefer the simplest solution that meets the goal. Flag features, abstractions, or dependencies that add complexity without clear value; don't quietly expand the request.

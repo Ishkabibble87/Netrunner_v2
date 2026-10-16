@@ -28,6 +28,8 @@ from content.decks.models import PreconstructedDeck
 from content.opponents.loader import load_opponent_profiles
 from content.opponents.models import OpponentProfile
 from game.models import DeckSelection
+from game.commands import ChooseMulligan
+from game.setup import IllegalCommand
 
 from .schemas import (
     CreateGameRequest,
@@ -35,6 +37,7 @@ from .schemas import (
     DeckImportRequest,
     GameCreatedResponse,
     InitialGameView,
+    MulliganCommandRequest,
     OpponentProfileSummary,
     PreconstructedDeckResponse,
     SessionSnapshot,
@@ -70,6 +73,7 @@ def create_app(
         raise ValueError("The cleanup interval must be positive")
     sessions = session_store if session_store is not None else SessionStore()
     sockets: dict[UUID, WebSocket] = {}
+    command_lock = asyncio.Lock()
 
     async def cleanup_sessions() -> None:
         while True:
@@ -160,12 +164,12 @@ def create_app(
             )
         except GameSetupError as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
+        session = sessions.create(game_state, profile.profile_id, [request.player_id])
         initial_state = InitialGameView.from_game_state(
-            game_state,
+            session.state,
             request.player_id,
             api.state.card_definitions,
         )
-        session = sessions.create(game_state, profile.profile_id, [request.player_id])
         return GameCreatedResponse(
             opponent_profile_id=profile.profile_id,
             player_token=session.player_tokens[request.player_id],
@@ -190,6 +194,34 @@ def create_app(
                 with suppress(WebSocketDisconnect):
                     await socket.close(code=1000, reason="Player left game")
 
+    @api.post("/games/{game_id}/commands", response_model=SessionSnapshot)
+    async def submit_command(
+        game_id: UUID,
+        request: MulliganCommandRequest,
+        token: Annotated[str, Depends(player_token)],
+    ) -> SessionSnapshot:
+        # Keep commits and broadcasts in order when multiple clients submit.
+        async with command_lock:
+            try:
+                session, player_id = sessions.submit(
+                    game_id, token, ChooseMulligan(request.decision),
+                )
+            except IllegalCommand as error:
+                raise HTTPException(status_code=409, detail=str(error)) from error
+            for connection_id, viewer_id in list(session.connections.items()):
+                socket = sockets.get(connection_id)
+                if socket is not None:
+                    snapshot = SessionSnapshot(
+                        revision=session.revision,
+                        state=InitialGameView.from_game_state(session.state, viewer_id, definitions),
+                    )
+                    with suppress(WebSocketDisconnect, RuntimeError, OSError):
+                        await socket.send_json(snapshot.model_dump(mode="json"))
+            return SessionSnapshot(
+                revision=session.revision,
+                state=InitialGameView.from_game_state(session.state, player_id, definitions),
+            )
+
     @api.websocket("/games/{game_id}/events")
     async def game_events(websocket: WebSocket, game_id: UUID) -> None:
         try:
@@ -205,11 +237,12 @@ def create_app(
             session, player_id, connection_id = sessions.connect(game_id, token)
             sockets[connection_id] = websocket
             snapshot = SessionSnapshot(
+                revision=session.revision,
                 state=InitialGameView.from_game_state(session.state, player_id, definitions)
             )
             await websocket.send_json(snapshot.model_dump(mode="json"))
             # Uvicorn's websockets backend detects silent failures with protocol pings.
-            # No game commands are implemented yet; inspection stays local to the client.
+            # Decisions use HTTP; the socket delivers private state snapshots.
             while True:
                 await websocket.receive_text()
         except WebSocketDisconnect:

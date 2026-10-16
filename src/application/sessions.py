@@ -7,7 +7,19 @@ from threading import Lock
 from time import monotonic
 from uuid import UUID, uuid4
 
-from game.models import GameState
+from game.commands import ChooseMulligan
+from game.models import GameState, MulliganDecision, PlayerRole
+from game.setup import choose_mulligan
+
+
+def advance_ai_setup(state: GameState, ai_player_ids: set[UUID]) -> GameState:
+    """The initial scripted opponent keeps every opening hand when prompted."""
+    while state.setup.pending_player is not None:
+        player = state.corp if state.setup.pending_player is PlayerRole.CORP else state.runner
+        if player.player_id not in ai_player_ids:
+            break
+        state = choose_mulligan(state, player.player_id, ChooseMulligan(MulliganDecision.KEEP))
+    return state
 
 
 class SessionNotFound(Exception):
@@ -20,14 +32,20 @@ class SessionAccessDenied(Exception):
 
 @dataclass
 class GameSession:
+    """Current immutable snapshot, authentication, and live connection presence."""
+
     state: GameState
     opponent_profile_id: str
     player_tokens: dict[UUID, str]
     expires_at: float | None
+    ai_player_ids: set[UUID] = field(default_factory=set)
+    revision: int = 0
     connections: dict[UUID, UUID] = field(default_factory=dict)
 
 
 class SessionStore:
+    """Coordinate authenticated decisions and session lifecycle under one lock."""
+
     def __init__(
         self,
         *,
@@ -56,11 +74,13 @@ class SessionStore:
         with self._lock:
             if state.game_id in self._sessions:
                 raise ValueError("A session already exists for this game")
+            ai_player_ids = {state.corp.player_id, state.runner.player_id} - humans
             session = GameSession(
-                state=state,
+                state=advance_ai_setup(state, ai_player_ids),
                 opponent_profile_id=opponent_profile_id,
                 player_tokens={player_id: token_urlsafe(32) for player_id in humans},
                 expires_at=self._clock() + self.connect_timeout_seconds,
+                ai_player_ids=ai_player_ids,
             )
             self._sessions[state.game_id] = session
             return session
@@ -81,6 +101,17 @@ class SessionStore:
     def get(self, game_id: UUID, token: str) -> tuple[GameSession, UUID]:
         with self._lock:
             return self._authenticated(game_id, token)
+
+    def submit(
+        self, game_id: UUID, token: str, command: ChooseMulligan,
+    ) -> tuple[GameSession, UUID]:
+        """Commit a legal human decision and any immediately following AI choice."""
+        with self._lock:
+            session, player_id = self._authenticated(game_id, token)
+            state = choose_mulligan(session.state, player_id, command)
+            session.state = advance_ai_setup(state, session.ai_player_ids)
+            session.revision += 1
+            return session, player_id
 
     def connect(self, game_id: UUID, token: str) -> tuple[GameSession, UUID, UUID]:
         with self._lock:
