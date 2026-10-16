@@ -23,7 +23,6 @@ def card(
     agenda_points: int | None = None,
     minimum_deck_size: int | None = None,
     influence_limit: int | None = None,
-    is_starter_only: bool = False,
 ) -> CardDefinition:
     """Build compact definitions for isolated rule cases."""
 
@@ -38,7 +37,6 @@ def card(
         agenda_points=agenda_points,
         minimum_deck_size=minimum_deck_size,
         influence_limit=influence_limit,
-        is_starter_only=is_starter_only,
     )
 
 
@@ -89,11 +87,10 @@ class DeckValidationTests(unittest.TestCase):
     def test_starter_only_identity_requires_explicit_starter_deck_allowance(self):
         starter = card(
             "starter-id",
-            "Starter Identity",
+            "The Catalyst: Convention Breaker",
             card_type=CardType.IDENTITY,
             minimum_deck_size=30,
             influence_limit=None,
-            is_starter_only=True,
         )
         self.cards["starter-id"] = starter
         selection = self.selection({"filler": 30}, identity_id="starter-id")

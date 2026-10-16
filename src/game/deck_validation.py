@@ -6,6 +6,14 @@ from content.cards.models import CardDefinition, CardSide, CardType
 from game.models import DeckSelection, PlayerRole
 
 
+STARTER_ONLY_IDENTITY_TITLES = frozenset(
+    {
+        "The Catalyst: Convention Breaker",
+        "The Syndicate: Profit over Principle",
+    }
+)
+
+
 class DeckValidationError(ValueError):
     """A deck selection violates a deck-construction requirement."""
 
@@ -21,8 +29,8 @@ def validate_deck(
 
     Card copy limits are checked by printed name and influence is counted for
     each copy. Tournament restrictions are format-specific and are not applied
-    here. The bundled starter-only identities are accepted only when setup
-    explicitly identifies their included starter-pack decks.
+    here. The two rulebook-named starter-only identities are accepted only
+    when setup explicitly identifies their included starter-pack decks.
     """
 
     identity = card_definitions.get(selection.identity_definition_id)
@@ -36,7 +44,7 @@ def validate_deck(
     if identity.side is not expected_side:
         raise DeckValidationError(f"{identity.title!r} is not a {role.value} identity")
     if (
-        identity.is_starter_only
+        identity.title in STARTER_ONLY_IDENTITY_TITLES
         and identity.definition_id not in allowed_starter_only_identity_ids
     ):
         raise DeckValidationError(

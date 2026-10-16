@@ -57,7 +57,6 @@ class CardDefinition(CardContentModel):
     memory_cost: int | None = Field(default=None, ge=0)
     influence_cost: int | None = Field(default=None, ge=0)
     deck_limit: int | None = Field(default=None, ge=0)
-    is_starter_only: bool = Field(default=False, exclude=True)
     base_link: int | None = Field(default=None, ge=0)
     minimum_deck_size: int | None = Field(default=None, ge=0)
     influence_limit: int | None = Field(default=None, ge=0)

@@ -6,7 +6,11 @@ from uuid import UUID, uuid4
 
 from content.cards.models import CardDefinition
 from content.opponents.models import OpponentProfile
-from game.deck_validation import DeckValidationError, validate_deck
+from game.deck_validation import (
+    STARTER_ONLY_IDENTITY_TITLES,
+    DeckValidationError,
+    validate_deck,
+)
 from game.models import (
     CardInstance,
     CardZone,
@@ -61,7 +65,7 @@ def create_ai_game(
         if (
             selection == profile_selection
             and profile_identity is not None
-            and profile_identity.is_starter_only
+            and profile_identity.title in STARTER_ONLY_IDENTITY_TITLES
         ):
             allowed_starter_identity_ids.add(profile_identity.definition_id)
 
