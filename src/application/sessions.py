@@ -20,6 +20,12 @@ class SessionAccessDenied(Exception):
 
 @dataclass
 class GameSession:
+    """Mutable session record shared with callers of the store.
+
+    Connection IDs identify individual sockets and map to their human players.
+    ``expires_at`` uses the store's clock; None disables expiry while connected.
+    """
+
     state: GameState
     opponent_profile_id: str
     player_tokens: dict[UUID, str]
@@ -28,6 +34,18 @@ class GameSession:
 
 
 class SessionStore:
+    """Own human-player credentials and connection lifetimes within one process.
+
+    New sessions expire unless a socket connects before the initial deadline.
+    Any connected socket keeps the session alive; losing the last socket starts
+    the reconnect deadline. Authentication enforces expiry between cleanup runs.
+    Explicitly leaving revokes a player's token, and the last player leaving
+    removes the session immediately.
+
+    The lock protects store operations, not subsequent use of returned records.
+    Callers receive the stored GameSession itself, including its mutable state.
+    """
+
     def __init__(
         self,
         *,

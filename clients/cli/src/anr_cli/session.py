@@ -16,6 +16,18 @@ class SessionConnectionError(Exception):
 
 
 class SessionConnection:
+    """Keep a session connected for the lifetime of a synchronous ``with`` block.
+
+    Entering opens the socket and validates its first snapshot before starting
+    a background listener; initial connection failures raise SessionConnectionError.
+    The listener updates status/error and retries interrupted connections, but
+    a normal server close ends the session. Exiting stops retries and closes
+    the socket.
+
+    ``initial_state`` is replaced on reconnect. Later messages are currently
+    consumed without applying updates to the inspector's state.
+    """
+
     def __init__(
         self,
         api_url: str,
@@ -95,6 +107,13 @@ class SessionConnection:
                     return
 
     def _reconnect(self) -> bool:
+        """Retry until stopped or the reconnect window elapses.
+
+        HTTP 400/401/403/404 responses and invalid snapshots end retries early;
+        transport failures and other rejected handshakes remain retryable.
+        The deadline is checked between attempts, so an in-flight open may
+        finish after the window has elapsed.
+        """
         self.status = "Disconnected: reconnecting"
         deadline = monotonic() + self.reconnect_timeout_seconds
         while not self._stop.is_set():
