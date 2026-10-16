@@ -66,6 +66,7 @@ def validate_deck(
     copy_limit_by_name: dict[str, int] = {}
     influence_spent = 0
     agenda_points = 0
+    # Rule 1.4.7 counts copies by card name, even when definitions differ.
     for definition_id, count in selection.card_counts.items():
         definition = card_definitions.get(definition_id)
         if definition is None:
@@ -86,6 +87,7 @@ def validate_deck(
         )
 
         if definition.faction_code != identity.faction_code:
+            # Influence is charged per copy, so multiply before summing.
             if definition.influence_cost is None:
                 raise DeckValidationError(
                     f"Out-of-faction card {definition.title!r} has no influence cost"
@@ -137,6 +139,7 @@ def _corp_agenda_point_range(deck_size: int) -> tuple[int, int] | None:
     if 50 <= deck_size <= 54:
         return 22, 23
     if deck_size >= 55:
+        # Rule 1.4.6 adds 2 agenda points for each full 5 cards above 50.
         additional_points = 2 * ((deck_size - 50) // 5)
         return 22 + additional_points, 23 + additional_points
     return None

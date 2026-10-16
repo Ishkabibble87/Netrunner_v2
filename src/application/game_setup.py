@@ -59,6 +59,7 @@ def create_ai_game(
 
     selected_decks = {player_role: decklist, opponent_role: opponent_deck}
     allowed_starter_identity_ids: set[str] = set()
+    # Starter-only identities are exempt only for the exact profile decklists.
     for role, selection in selected_decks.items():
         profile_selection = opponent_profile.deck_selections[role]
         profile_identity = card_definitions.get(profile_selection.identity_definition_id)
