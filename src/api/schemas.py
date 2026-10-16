@@ -1,4 +1,12 @@
-"""HTTP request and player-visible response schemas."""
+"""Define the API's validated requests and player-visible response models.
+
+These Pydantic schemas describe the HTTP and WebSocket boundary: they shape
+incoming commands, catalog/setup responses, and per-player game projections.
+Conversion helpers turn content and authoritative game state into transport
+views while keeping concealed information out of an opponent's response. Game
+rules and authoritative state belong in ``src/game``; these models describe
+what the API accepts and returns.
+"""
 
 from collections.abc import Mapping
 from typing import Literal

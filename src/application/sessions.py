@@ -13,7 +13,11 @@ from game.setup import choose_mulligan
 
 
 def advance_ai_setup(state: GameState, ai_player_ids: set[UUID]) -> GameState:
-    """The initial scripted opponent keeps every opening hand when prompted."""
+    """Resolve consecutive opening-hand prompts for scripted AI players.
+
+    Stop as soon as setup is complete or a human player must choose. The current
+    training opponent always keeps its hand; this helper does not choose for humans.
+    """
     while state.setup.pending_player is not None:
         player = state.corp if state.setup.pending_player is PlayerRole.CORP else state.runner
         if player.player_id not in ai_player_ids:
@@ -32,7 +36,11 @@ class SessionAccessDenied(Exception):
 
 @dataclass
 class GameSession:
-    """Current immutable snapshot, authentication, and live connection presence."""
+    """Mutable session record holding the current immutable game snapshot.
+
+    Connection IDs identify individual sockets and map to their human players.
+    ``expires_at`` uses the store's clock; None disables expiry while connected.
+    """
 
     state: GameState
     opponent_profile_id: str
@@ -44,7 +52,18 @@ class GameSession:
 
 
 class SessionStore:
-    """Coordinate authenticated decisions and session lifecycle under one lock."""
+    """Coordinate authenticated decisions and connection lifetimes in one process.
+
+    New sessions expire unless a socket connects before the initial deadline.
+    Any connected socket keeps the session alive; losing the last socket starts
+    the reconnect deadline. Authentication enforces expiry between cleanup runs.
+    Explicitly leaving revokes a player's token, and the last player leaving
+    removes the session immediately.
+
+    The lock protects store operations, including replacing the game snapshot
+    and advancing its revision after decisions. Callers receive the mutable
+    GameSession itself; subsequent access to it is outside the store's lock.
+    """
 
     def __init__(
         self,
@@ -53,6 +72,12 @@ class SessionStore:
         reconnect_timeout_seconds: float = 30,
         clock: Callable[[], float] = monotonic,
     ) -> None:
+        """Create an empty store with positive connection deadlines.
+
+        ``clock`` is injectable so lifecycle deadlines can be driven without
+        waiting in tests. The lock protects access shared by API worker threads
+        and the asynchronous socket and cleanup handlers.
+        """
         if connect_timeout_seconds <= 0 or reconnect_timeout_seconds <= 0:
             raise ValueError("Session timeouts must be positive")
         self.connect_timeout_seconds = connect_timeout_seconds
@@ -68,6 +93,12 @@ class SessionStore:
         opponent_profile_id: str,
         human_player_ids: Iterable[UUID],
     ) -> GameSession:
+        """Register a game and issue a secret token for each human player.
+
+        Player IDs not listed as human are treated as AI and their opening-hand
+        prompts are advanced before the session becomes visible. The initial
+        connection deadline starts at creation; duplicate game IDs are rejected.
+        """
         humans = set(human_player_ids)
         if not humans or not humans <= {state.corp.player_id, state.runner.player_id}:
             raise ValueError("A session needs human players belonging to its game")
@@ -75,6 +106,7 @@ class SessionStore:
             if state.game_id in self._sessions:
                 raise ValueError("A session already exists for this game")
             ai_player_ids = {state.corp.player_id, state.runner.player_id} - humans
+            # Move past AI mulligan prompts so the client only sees choices for humans.
             session = GameSession(
                 state=advance_ai_setup(state, ai_player_ids),
                 opponent_profile_id=opponent_profile_id,
@@ -86,7 +118,11 @@ class SessionStore:
             return session
 
     def _authenticated(self, game_id: UUID, token: str) -> tuple[GameSession, UUID]:
-        """Caller holds the lock; expired sessions cannot be revived between sweeps."""
+        """Return the session and token owner; caller must hold the store lock.
+
+        Expiration is enforced here as well as by the periodic cleanup sweep, so
+        a request cannot revive an overdue session just because cleanup is late.
+        """
         session = self._sessions.get(game_id)
         if session is None:
             raise SessionNotFound("Game session not found")
@@ -94,18 +130,25 @@ class SessionStore:
             del self._sessions[game_id]
             raise SessionNotFound("Game session has expired")
         for player_id, expected_token in session.player_tokens.items():
+            # Reject non-ASCII input before constant-time comparison of secrets.
             if token.isascii() and compare_digest(token, expected_token):
                 return session, player_id
         raise SessionAccessDenied("Invalid player session token")
 
     def get(self, game_id: UUID, token: str) -> tuple[GameSession, UUID]:
+        """Authenticate a player and return the live session record and player ID."""
         with self._lock:
             return self._authenticated(game_id, token)
 
     def submit(
         self, game_id: UUID, token: str, command: ChooseMulligan,
     ) -> tuple[GameSession, UUID]:
-        """Commit a legal human decision and any immediately following AI choice."""
+        """Apply an authenticated mulligan choice and advance scripted setup.
+
+        Rule validation happens in the game layer. On success, replace the
+        immutable state snapshot and increment its revision under the same lock,
+        so connected clients can detect that the visible state has changed.
+        """
         with self._lock:
             session, player_id = self._authenticated(game_id, token)
             state = choose_mulligan(session.state, player_id, command)
@@ -114,14 +157,21 @@ class SessionStore:
             return session, player_id
 
     def connect(self, game_id: UUID, token: str) -> tuple[GameSession, UUID, UUID]:
+        """Authenticate a socket, register its connection ID, and disable expiry.
+
+        Multiple sockets may belong to one player. The session remains available
+        while any socket is connected, regardless of the initial/reconnect deadline.
+        """
         with self._lock:
             session, player_id = self._authenticated(game_id, token)
             connection_id = uuid4()
             session.connections[connection_id] = player_id
+            # The first active connection cancels either pending expiry deadline.
             session.expires_at = None
             return session, player_id, connection_id
 
     def disconnect(self, game_id: UUID, connection_id: UUID) -> None:
+        """Remove a socket and start the reconnect deadline after the last closes."""
         with self._lock:
             session = self._sessions.get(game_id)
             if session is None or connection_id not in session.connections:
@@ -131,7 +181,12 @@ class SessionStore:
                 session.expires_at = self._clock() + self.reconnect_timeout_seconds
 
     def leave(self, game_id: UUID, token: str) -> set[UUID]:
-        """Revoke this player's token and return their sockets for the API to close."""
+        """Revoke one player's access and return their sockets for the API to close.
+
+        If another player remains, their session is preserved. When no players
+        remain, delete the game immediately; when another token remains but no
+        sockets are active, begin the reconnect deadline.
+        """
         with self._lock:
             session, player_id = self._authenticated(game_id, token)
             del session.player_tokens[player_id]
@@ -147,6 +202,11 @@ class SessionStore:
             return connection_ids
 
     def remove_expired(self) -> int:
+        """Delete every disconnected session whose deadline has passed.
+
+        Called periodically by the API; authentication independently checks the
+        same deadline. Return the number removed for monitoring and tests.
+        """
         with self._lock:
             now = self._clock()
             expired = [
@@ -159,5 +219,6 @@ class SessionStore:
             return len(expired)
 
     def clear(self) -> None:
+        """Remove every session, such as when the in-memory API shuts down."""
         with self._lock:
             self._sessions.clear()
