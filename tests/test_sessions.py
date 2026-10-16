@@ -15,7 +15,7 @@ class SessionStoreTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         root = Path(__file__).resolve().parents[1]
-        cls.catalog = load_nsg_card_definitions(root / "src/content/cards/system-gateway/cards.json")
+        cls.catalog = load_nsg_card_definitions(root / "content/cards/system-gateway/cards.json")
         cls.profile = load_opponent_profiles(cls.catalog)["system-gateway-training"]
 
     def setUp(self):

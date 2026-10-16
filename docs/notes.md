@@ -27,7 +27,7 @@ System Update 2021 is not in this target Standard pool. Refresh the target when 
 
 Keep card definitions separate from printings, set membership, and format legality. Store format pools and ban lists as separate, versioned data, and retain card records when sets rotate out. Model abilities, timing windows, prompts, and effects generically; use explicit card handlers only for effects that cannot be represented by shared operations. Adding future card data should not require code keyed to a set or card title, though genuinely new mechanics may require new engine support.
 
-For NSG card JSON imports, use the card record's unique `code` as `CardDefinition.definition_id`; `pack_code` is set membership metadata. The content loader belongs in `src/content/cards/` and maps source records to normalized definitions. Each copy created for a game receives its own instance ID, while copies of the same card share the definition ID. Preserve printed rules text for display; do not parse it at runtime.
+For NSG card JSON imports, use the card record's unique `code` as `CardDefinition.definition_id`; `pack_code` is set membership metadata. The shared content loader belongs in `content/cards/` and maps source records to normalized definitions. Each copy created for a game receives its own instance ID, while copies of the same card share the definition ID. Preserve printed rules text for display; do not parse it at runtime.
 
 ## Initial model outline
 
@@ -62,11 +62,11 @@ Treat this as a planning map; refine it as game flow is implemented.
 ### Deck import
 
 NetrunnerDB text-file exports can be imported into `DeckSelection` through
-`src/content/decks/deck_importer.py`. The CLI should let
+`content/decks/deck_importer.py`. The CLI should let
 the player select a file and send its contents through the setup API. Keep file
 import separate from deck legality, implemented-card checks, and creating
 in-game card copies. Both System Gateway starter exports are tracked under
-`src/content/decks/system-gateway/`.
+`content/decks/system-gateway/`.
 
 ## Provisional API surface
 

@@ -20,7 +20,7 @@ class DeckImportApiTests(unittest.TestCase):
     def test_starter_uploads_can_create_games(self):
         for side in ("corp", "runner"):
             with self.subTest(side=side):
-                text = (ROOT / f"src/content/decks/system-gateway/starter-{side}.txt").read_text(
+                text = (ROOT / f"content/decks/system-gateway/starter-{side}.txt").read_text(
                     encoding="utf-8"
                 )
                 response = self.client.post("/decks/import", json={"text": text})

@@ -192,9 +192,7 @@ class GameScreen:
         self._invalidate()
 
     def _header_fragments(self) -> list[tuple[str, str]]:
-        game_id = str(self.state.get("game_id", ""))
-        game_label = f" · GAME ID: {game_id[:8]}" if game_id else ""
-        return [("class:header", f"ANDROID: NETRUNNER{game_label}")]
+        return [("class:header", "ANDROID: NETRUNNER")]
 
     def _footer_fragments(self) -> list[tuple[str, str]]:
         if self.level.kind == "card":
@@ -263,6 +261,11 @@ class GameScreen:
         if self.connection_status is not None:
             line(self.connection_status(), "class:muted")
         line()
+        game_id = str(self.state.get("game_id", ""))
+        if game_id:
+            line("GAME ID · share to join", "class:section")
+            line(game_id)
+            line()
 
         if self.level.kind == "card":
             self._append_card_detail(fragments)

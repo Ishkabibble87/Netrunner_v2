@@ -17,5 +17,5 @@ These exports identify cards by title and set name, with quantity prefixes,
 section headings, influence symbols, and summary lines. A plaintext importer
 must resolve titles against the card catalog and separate the identity from
 main-deck quantities before producing `DeckSelection`. The importer is in
-`src/content/decks/deck_importer.py`. These are teaching decks; validate them under
+`content/decks/deck_importer.py`. These are teaching decks; validate them under
 starter-game rules.

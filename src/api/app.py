@@ -56,7 +56,7 @@ def create_app(
     if definitions is None:
         project_root = Path(__file__).resolve().parents[2]
         definitions = load_nsg_card_definitions(
-            project_root / "src/content/cards/system-gateway/cards.json"
+            project_root / "content/cards/system-gateway/cards.json"
         )
     if profiles is None:
         profiles = load_opponent_profiles(definitions)

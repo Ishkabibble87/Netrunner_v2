@@ -15,7 +15,7 @@ class DeckImporterTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.catalog = load_nsg_card_definitions(
-            ROOT / "src/content/cards/system-gateway/cards.json"
+            ROOT / "content/cards/system-gateway/cards.json"
         )
 
     def parse(self, body, identity="The Catalyst: Convention Breaker"):
@@ -26,7 +26,7 @@ class DeckImporterTests(unittest.TestCase):
     def test_starter_exports_match_every_card_and_identity(self):
         for side, count, identity_id in (("runner", 30, "30076"), ("corp", 34, "30077")):
             with self.subTest(side=side):
-                path = ROOT / f"src/content/decks/system-gateway/starter-{side}.txt"
+                path = ROOT / f"content/decks/system-gateway/starter-{side}.txt"
                 deck = load_nrdb_deck(path, self.catalog)
                 self.assertEqual(deck.identity_definition_id, identity_id)
                 self.assertEqual(sum(deck.card_counts.values()), count)
