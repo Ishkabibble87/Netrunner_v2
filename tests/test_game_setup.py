@@ -22,6 +22,9 @@ class OpeningHandRulesTests(unittest.TestCase):
             game_id=None, corp_player_id=uuid4(), runner_player_id=uuid4(),
             corp_deck=decks[PlayerRole.CORP], runner_deck=decks[PlayerRole.RUNNER],
             card_definitions=catalog, rng=random.Random(0),
+            allowed_starter_only_identity_ids=frozenset(
+                deck.identity_definition_id for deck in decks.values()
+            ),
         )
 
     def cards(self, state, player_id, zone):

@@ -1,4 +1,4 @@
-"""Deal validated decks and resolve the standard pregame sequence (CR 1.6).
+"""Validate decks, deal opening hands, and resolve the standard pregame sequence (CR 1.6).
 
 Identity setup abilities and turn-beginning abilities are not implemented yet.
 The supported starter identities have no such abilities.
@@ -10,6 +10,7 @@ from uuid import UUID, uuid4
 
 from content.cards.models import CardDefinition
 from .commands import ChooseMulligan
+from .deck_validation import DeckValidationError, validate_deck
 from .models import (
     CardInstance, CardZone, DeckSelection, GameState, MulliganDecision,
     PlayerRole, PlayerState, TurnPhase, TurnState, ZoneLocation,
@@ -95,14 +96,28 @@ def create_game_state(
     runner_player_id: UUID,
     runner_deck: DeckSelection,
     card_definitions: Mapping[str, CardDefinition],
+    allowed_starter_only_identity_ids: frozenset[str] = frozenset(),
     rng: random.Random | None = None,
 ) -> GameState:
-    """Create unique card instances, shuffle both decks, and deal opening hands."""
+    """Validate both selections, create unique copies, shuffle, and deal hands."""
 
     if corp_player_id == runner_player_id:
         raise ValueError("Corp and Runner must be different players")
-    corp_identity = card_definitions[corp_deck.identity_definition_id]
-    runner_identity = card_definitions[runner_deck.identity_definition_id]
+    corp_identity = validate_deck(
+        corp_deck, PlayerRole.CORP, card_definitions,
+        allowed_starter_only_identity_ids=allowed_starter_only_identity_ids,
+    )
+    runner_identity = validate_deck(
+        runner_deck, PlayerRole.RUNNER, card_definitions,
+        allowed_starter_only_identity_ids=allowed_starter_only_identity_ids,
+    )
+    if (
+        sum(corp_deck.card_counts.values()) < OPENING_HAND_SIZE
+        or sum(runner_deck.card_counts.values()) < OPENING_HAND_SIZE
+    ):
+        raise DeckValidationError(
+            f"Each main deck needs at least {OPENING_HAND_SIZE} cards to deal an opening hand"
+        )
     source = rng if rng is not None else random.SystemRandom()
     game_id = game_id or uuid4()
     cards: dict[UUID, CardInstance] = {}
