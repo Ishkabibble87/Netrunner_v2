@@ -9,7 +9,7 @@ what the API accepts and returns.
 """
 
 from collections.abc import Mapping
-from typing import Literal
+from typing import Annotated, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -17,6 +17,15 @@ from pydantic import BaseModel, ConfigDict, Field
 from content.cards.models import CardDefinition, CardSide, CardType
 from content.decks.models import PreconstructedDeck
 from content.opponents.models import OpponentProfile
+from game.commands import (
+    ChooseMulligan,
+    DrawCard,
+    GameCommand,
+    GainCredit,
+    PurgeVirusCounters,
+    RemoveTag,
+)
+from game.engine import legal_actions_for
 from game.models import (
     CardZone, DeckSelection, GameState, MulliganDecision, PlayerRole, PlayerState,
 )
@@ -37,8 +46,74 @@ class DeckImportRequest(ApiModel):
 
 
 class MulliganCommandRequest(ApiModel):
+    """Choose whether to keep the current opening hand or mulligan."""
+
     type: Literal["choose_mulligan"]
     decision: MulliganDecision
+
+
+class GainCreditCommandRequest(ApiModel):
+    """Request the one-click basic action that gains one credit."""
+
+    type: Literal["gain_credit"]
+
+
+class DrawCardCommandRequest(ApiModel):
+    """Request the one-click basic action that draws one card."""
+
+    type: Literal["draw_card"]
+
+
+class RemoveTagCommandRequest(ApiModel):
+    """Request the Runner's one-click, two-credit tag-removal action."""
+
+    type: Literal["remove_tag"]
+
+
+class PurgeVirusCountersCommandRequest(ApiModel):
+    """Request the Corp's three-click virus-counter purge action."""
+
+    type: Literal["purge_virus_counters"]
+
+
+PlayerCommandRequest = Annotated[
+    MulliganCommandRequest
+    | GainCreditCommandRequest
+    | DrawCardCommandRequest
+    | RemoveTagCommandRequest
+    | PurgeVirusCountersCommandRequest,
+    Field(discriminator="type"),
+]
+
+
+def game_command_from_request(request: PlayerCommandRequest) -> GameCommand:
+    """Translate a validated API command into the transport-independent game type."""
+    if isinstance(request, MulliganCommandRequest):
+        return ChooseMulligan(request.decision)
+    if isinstance(request, GainCreditCommandRequest):
+        return GainCredit()
+    if isinstance(request, DrawCardCommandRequest):
+        return DrawCard()
+    if isinstance(request, RemoveTagCommandRequest):
+        return RemoveTag()
+    if isinstance(request, PurgeVirusCountersCommandRequest):
+        return PurgeVirusCounters()
+    raise ValueError("Unsupported API command")
+
+
+def command_request_from_game(command: GameCommand) -> PlayerCommandRequest:
+    """Project a domain command into the shape clients can submit and display."""
+    if isinstance(command, ChooseMulligan):
+        return MulliganCommandRequest(type="choose_mulligan", decision=command.decision)
+    if isinstance(command, GainCredit):
+        return GainCreditCommandRequest(type="gain_credit")
+    if isinstance(command, DrawCard):
+        return DrawCardCommandRequest(type="draw_card")
+    if isinstance(command, RemoveTag):
+        return RemoveTagCommandRequest(type="remove_tag")
+    if isinstance(command, PurgeVirusCounters):
+        return PurgeVirusCountersCommandRequest(type="purge_virus_counters")
+    raise ValueError("Unsupported game command")
 
 
 class SetupView(ApiModel):
@@ -60,10 +135,13 @@ class TurnView(ApiModel):
 
 
 class PlayerSummary(ApiModel):
+    """Public information shared for either player in a game view."""
+
     player_id: UUID
     role: PlayerRole
     credits: int
     clicks_remaining: int
+    tags: int
     identity: CardView
     deck_count: int
 
@@ -77,7 +155,7 @@ class OpponentView(PlayerSummary):
 
 
 class InitialGameView(ApiModel):
-    """Current state projection for one player; concealed cards stay hidden."""
+    """Current state projection with private cards and legal actions for one viewer."""
 
     game_id: UUID
     viewer_player_id: UUID
@@ -85,6 +163,9 @@ class InitialGameView(ApiModel):
     setup: SetupView
     turn: TurnView | None
     winner: PlayerRole | None
+    legal_actions: list[PlayerCommandRequest] = Field(
+        description="Commands currently available to this viewer; submission is validated again",
+    )
     you: OwnPlayerView
     opponent: OpponentView
     servers: list[str | int]
@@ -122,6 +203,7 @@ class InitialGameView(ApiModel):
                 role=player.role,
                 credits=player.credits,
                 clicks_remaining=player.clicks_remaining,
+                tags=player.tags,
                 identity=identity,
                 deck_count=sum(
                     card.location.zone is CardZone.DECK
@@ -152,6 +234,10 @@ class InitialGameView(ApiModel):
                 phase=state.turn.phase.value,
             ) if state.turn is not None else None,
             winner=state.winner,
+            legal_actions=[
+                command_request_from_game(command)
+                for command in legal_actions_for(state, viewer_player_id)
+            ],
             you=OwnPlayerView(**player_summary(you).model_dump(), hand=own_hand),
             opponent=OpponentView(
                 **player_summary(opponent).model_dump(),

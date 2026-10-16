@@ -1,4 +1,4 @@
-"""Interactive CLI for creating and inspecting games through the game API."""
+"""Interactive CLI for creating, inspecting, and commanding games through the API."""
 
 import json
 from pathlib import Path
@@ -199,11 +199,11 @@ def play_ai(api_url: str) -> None:
             player_token,
             reconnect_timeout_seconds=response["reconnect_timeout_seconds"],
         ) as connection:
-            def choose_opening_hand(decision: str) -> dict[str, Any]:
+            def submit_action(command: dict[str, Any]) -> dict[str, Any]:
                 try:
                     snapshot = request_json(
                         api_url, f"/games/{game_id}/commands",
-                        {"type": "choose_mulligan", "decision": decision},
+                        command,
                         player_token=player_token,
                     )
                 except ApiError as error:
@@ -211,12 +211,16 @@ def play_ai(api_url: str) -> None:
                 connection.accept_snapshot(snapshot)
                 return connection.latest_state
 
+            def choose_opening_hand(decision: str) -> dict[str, Any]:
+                return submit_action({"type": "choose_mulligan", "decision": decision})
+
             GameScreen(
                 connection.initial_state,
                 catalog_by_id,
                 connection_status=lambda: connection.status,
                 state_provider=lambda: connection.latest_state,
                 choose_opening_hand=choose_opening_hand,
+                submit_action=submit_action,
             ).run()
         if connection.error is not None:
             console.print(connection.error, style="red")

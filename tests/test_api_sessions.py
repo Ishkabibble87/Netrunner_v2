@@ -1,4 +1,4 @@
-"""Verify session presence, private snapshots, and cleanup through the API."""
+"""Exercise session lifecycle and player commands through the API surface."""
 
 import unittest
 from threading import Event
@@ -46,6 +46,76 @@ class SessionApiTests(unittest.TestCase):
             self.assertNotIn("player_token", message["state"])
             self.now += 3600
             self.assertEqual(self.store.remove_expired(), 0)
+
+    def test_basic_commands_update_legal_actions_and_live_snapshots(self):
+        """Carry one Corp game from setup through draw and credit actions."""
+        corp_deck = next(
+            deck["decklist"]
+            for deck in self.client.get("/preconstructed-decks").json()
+            if deck["role"] == "corp"
+        )
+        created = self.client.post("/games", json={
+            "player_id": str(uuid4()),
+            "decklist": corp_deck,
+            "opponent_profile_id": "system-gateway-training",
+        })
+        self.assertEqual(created.status_code, 201, created.text)
+        game = created.json()
+        game_id = game["initial_state"]["game_id"]
+        headers = {"Authorization": f"Bearer {game['player_token']}"}
+        path = f"/games/{game_id}"
+
+        with self.client.websocket_connect(f"{path}/events", headers=headers) as socket:
+            initial = socket.receive_json()
+            self.assertEqual(
+                [action["decision"] for action in initial["state"]["legal_actions"]],
+                ["keep", "mulligan"],
+            )
+            self.assertNotIn("legal_actions", initial["state"]["opponent"])
+
+            kept = self.client.post(
+                f"{path}/commands", headers=headers,
+                json={"type": "choose_mulligan", "decision": "keep"},
+            )
+            self.assertEqual(kept.status_code, 200, kept.text)
+            action_state = kept.json()["state"]
+            self.assertEqual(
+                [action["type"] for action in action_state["legal_actions"]],
+                ["gain_credit", "draw_card", "purge_virus_counters"],
+            )
+            socket_state = socket.receive_json()
+            self.assertEqual(socket_state["state"], action_state)
+
+            hand_size = len(action_state["you"]["hand"])
+            deck_count = action_state["you"]["deck_count"]
+            clicks = action_state["you"]["clicks_remaining"]
+            drawn = self.client.post(
+                f"{path}/commands", headers=headers, json={"type": "draw_card"},
+            )
+            self.assertEqual(drawn.status_code, 200, drawn.text)
+            drawn_state = drawn.json()["state"]
+            self.assertEqual(len(drawn_state["you"]["hand"]), hand_size + 1)
+            self.assertEqual(drawn_state["you"]["deck_count"], deck_count - 1)
+            self.assertEqual(drawn_state["you"]["clicks_remaining"], clicks - 1)
+            self.assertEqual(socket.receive_json()["state"], drawn_state)
+
+            credits = drawn_state["you"]["credits"]
+            credited = self.client.post(
+                f"{path}/commands", headers=headers, json={"type": "gain_credit"},
+            )
+            self.assertEqual(credited.status_code, 200, credited.text)
+            credited_state = credited.json()["state"]
+            self.assertEqual(credited_state["you"]["credits"], credits + 1)
+            self.assertEqual(credited_state["you"]["clicks_remaining"], clicks - 2)
+            self.assertEqual(socket.receive_json()["state"], credited_state)
+
+            rejected = self.client.post(
+                f"{path}/commands", headers=headers,
+                json={"type": "purge_virus_counters"},
+            )
+            self.assertEqual(rejected.status_code, 409)
+            unchanged = self.client.get(f"{path}/state", headers=headers).json()
+            self.assertEqual(unchanged, credited_state)
 
     def test_reconnect_restores_same_game_and_old_disconnect_cannot_remove_it(self):
         with self.client.websocket_connect(f"{self.path}/events", headers=self.headers) as old:

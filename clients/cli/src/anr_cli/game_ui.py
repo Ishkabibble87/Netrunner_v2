@@ -1,4 +1,4 @@
-"""Keyboard-driven game inspector and opening-hand choices through the API."""
+"""Keyboard-driven game inspector and player commands through the API."""
 
 from __future__ import annotations
 
@@ -44,7 +44,7 @@ class MenuLevel:
 
 
 class GameScreen:
-    """Show private game snapshots and prompt for setup choices when available."""
+    """Show private game snapshots and offer commands from the server's view."""
 
     wide_columns = 106
 
@@ -56,12 +56,14 @@ class GameScreen:
         connection_status: Callable[[], str] | None = None,
         state_provider: Callable[[], dict[str, Any]] | None = None,
         choose_opening_hand: Callable[[str], dict[str, Any]] | None = None,
+        submit_action: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
     ) -> None:
         self.state = state
         self.card_catalog = card_catalog
         self.connection_status = connection_status
         self.state_provider = state_provider
         self.choose_opening_hand = choose_opening_hand
+        self.submit_action = submit_action
         self.command_error: str | None = None
         self.you = state.get("you", {})
         self.opponent = state.get("opponent", {})
@@ -98,8 +100,35 @@ class GameScreen:
         return self.levels[-1]
 
     def _root_choices(self) -> list[MenuChoice]:
-        choices = []
-        if self.choose_opening_hand is not None and self.state.get("setup", {}).get("pending_player") == self.viewer_role:
+        choices: list[MenuChoice] = []
+        legal_actions = self.state.get("legal_actions")
+        if isinstance(legal_actions, list):
+            for action in legal_actions:
+                if not isinstance(action, dict):
+                    continue
+                action_type = action.get("type")
+                if action_type == "choose_mulligan" and self.choose_opening_hand is not None:
+                    decision = action.get("decision")
+                    if decision == "keep":
+                        choices.append(MenuChoice("Keep opening hand", "opening_hand", decision))
+                    elif decision == "mulligan":
+                        choices.append(
+                            MenuChoice("Mulligan · shuffle and draw five", "opening_hand", decision)
+                        )
+                elif self.submit_action is not None:
+                    label = {
+                        "gain_credit": "Gain 1 credit",
+                        "draw_card": "Draw 1 card",
+                        "remove_tag": "Remove 1 tag · 2 credits",
+                        "purge_virus_counters": "Purge virus counters · 3 clicks",
+                    }.get(action_type)
+                    if label is not None:
+                        choices.append(MenuChoice(label, "action", dict(action)))
+        elif (
+            self.choose_opening_hand is not None
+            and self.state.get("setup", {}).get("pending_player") == self.viewer_role
+        ):
+            # Older snapshots in local tools may predate the legal_actions field.
             choices.extend([
                 MenuChoice("Keep opening hand", "opening_hand", "keep"),
                 MenuChoice("Mulligan · shuffle and draw five", "opening_hand", "mulligan"),
@@ -257,6 +286,8 @@ class GameScreen:
         runner_stats = (
             f"{runner.get('credits', 0)} credits · {runner_hand} cards in grip"
         )
+        if runner.get("tags", 0):
+            runner_stats += f" · {runner['tags']} tags"
         if self.viewer_role == "corp":
             corp_stats += f" · {corp.get('clicks_remaining', 0)} clicks"
         if self.viewer_role == "runner":
@@ -309,12 +340,16 @@ class GameScreen:
             return fragments
 
         line("ACTIONS", "class:section")
-        line(
-            "Review your hand, then keep it or take one mulligan."
-            if self.state.get("setup", {}).get("pending_player") is not None
-            else "Basic actions are not implemented yet.",
-            "class:muted",
-        )
+        pending_player = self.state.get("setup", {}).get("pending_player")
+        if pending_player == self.viewer_role:
+            action_prompt = "Review your hand, then keep it or take one mulligan."
+        elif pending_player is not None:
+            action_prompt = f"Waiting for {str(pending_player).title()} to choose an opening hand."
+        elif self.state.get("legal_actions"):
+            action_prompt = "Choose an available action, or inspect the board."
+        else:
+            action_prompt = "No actions are available now; you can still inspect the board."
+        line(action_prompt, "class:muted")
         if self.command_error:
             line(self.command_error)
         line()
@@ -476,6 +511,17 @@ class GameScreen:
         elif choice.kind == "opening_hand":
             try:
                 state = self.choose_opening_hand(str(choice.value))
+            except (SessionConnectionError, ValueError, OSError) as error:
+                self.command_error = str(error)
+            else:
+                self.command_error = None
+                self.update_state(state)
+            self._invalidate()
+        elif choice.kind == "action":
+            try:
+                if self.submit_action is None:
+                    return
+                state = self.submit_action(choice.value)
             except (SessionConnectionError, ValueError, OSError) as error:
                 self.command_error = str(error)
             else:
