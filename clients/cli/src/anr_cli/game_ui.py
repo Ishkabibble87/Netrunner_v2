@@ -1,4 +1,4 @@
-"""Keyboard-driven, read-only game view for the initial API snapshot."""
+"""Keyboard-driven game inspector and opening-hand choices through the API."""
 
 from __future__ import annotations
 
@@ -24,6 +24,7 @@ from prompt_toolkit.widgets import Frame
 
 from .terminal import get_terminal_input
 from .navigation import navigation_bindings
+from .session import SessionConnectionError
 
 
 @dataclass
@@ -43,7 +44,7 @@ class MenuLevel:
 
 
 class GameScreen:
-    """Show the player-visible initial state with a responsive inspector."""
+    """Show private game snapshots and prompt for setup choices when available."""
 
     wide_columns = 106
 
@@ -53,10 +54,15 @@ class GameScreen:
         card_catalog: dict[str, dict[str, Any]],
         *,
         connection_status: Callable[[], str] | None = None,
+        state_provider: Callable[[], dict[str, Any]] | None = None,
+        choose_opening_hand: Callable[[str], dict[str, Any]] | None = None,
     ) -> None:
         self.state = state
         self.card_catalog = card_catalog
         self.connection_status = connection_status
+        self.state_provider = state_provider
+        self.choose_opening_hand = choose_opening_hand
+        self.command_error: str | None = None
         self.you = state.get("you", {})
         self.opponent = state.get("opponent", {})
         self.viewer_role = str(state.get("viewer_role", self.you.get("role", "")))
@@ -72,6 +78,7 @@ class GameScreen:
                 ],
             )
         ]
+        self.levels[0].choices = self._root_choices()
         self.app: Application[None] | None = None
         self.board_window = self._board_window()
         self.menu_window = self._menu_window()
@@ -89,6 +96,35 @@ class GameScreen:
     @property
     def level(self) -> MenuLevel:
         return self.levels[-1]
+
+    def _root_choices(self) -> list[MenuChoice]:
+        choices = []
+        if self.choose_opening_hand is not None and self.state.get("setup", {}).get("pending_player") == self.viewer_role:
+            choices.extend([
+                MenuChoice("Keep opening hand", "opening_hand", "keep"),
+                MenuChoice("Mulligan · shuffle and draw five", "opening_hand", "mulligan"),
+            ])
+        return choices + [
+            MenuChoice("Inspect cards · read only", "inspect"),
+            MenuChoice("Leave game", "exit"),
+        ]
+
+    def update_state(self, state: dict[str, Any]) -> None:
+        """Refresh the board and discard inspector references to the previous hand."""
+        if state == self.state:
+            return
+        self.state = state
+        self.you = state.get("you", {})
+        self.opponent = state.get("opponent", {})
+        self.viewer_role = str(state.get("viewer_role", self.you.get("role", "")))
+        self.hand = self.you.get("hand", [])
+        self.levels = [MenuLevel("Game", "root", self._root_choices())]
+        self._reset_menu_scroll()
+        self._invalidate()
+
+    def _refresh_state(self, app: Application) -> None:
+        if self.state_provider is not None:
+            self.update_state(self.state_provider())
 
     def run(self) -> None:
         wide = Condition(lambda: get_app().output.get_size().columns >= self.wide_columns)
@@ -158,7 +194,8 @@ class GameScreen:
                 }
             ),
             full_screen=True,
-            refresh_interval=1 if self.connection_status is not None else None,
+            refresh_interval=1 if self.connection_status is not None or self.state_provider is not None else None,
+            before_render=self._refresh_state,
         )
         self.app.run()
 
@@ -273,9 +310,13 @@ class GameScreen:
 
         line("ACTIONS", "class:section")
         line(
-            "Game actions are unavailable: the API does not yet return legal moves or accept commands.",
+            "Review your hand, then keep it or take one mulligan."
+            if self.state.get("setup", {}).get("pending_player") is not None
+            else "Basic actions are not implemented yet.",
             "class:muted",
         )
+        if self.command_error:
+            line(self.command_error)
         line()
         breadcrumb = self._breadcrumb()
         if breadcrumb:
@@ -371,7 +412,15 @@ class GameScreen:
         return [self._server_label(server) for server in self.state.get("servers", [])]
 
     def _status_text(self) -> str:
-        turn = self.state.get("turn", {})
+        winner = self.state.get("winner")
+        if winner:
+            return f"{str(winner).title()} wins"
+        pending = self.state.get("setup", {}).get("pending_player")
+        if pending is not None:
+            if pending == self.viewer_role:
+                return "Choose your opening hand · one mulligan allowed"
+            return f"Waiting for {str(pending).title()} opening-hand choice"
+        turn = self.state.get("turn") or {}
         active = str(turn.get("active_player", "unknown"))
         phase = str(turn.get("phase", "unknown")).replace("_", " ")
         number = turn.get("number", "?")
@@ -411,6 +460,8 @@ class GameScreen:
         self._invalidate()
 
     def _activate(self) -> None:
+        if self.state_provider is not None:
+            self.update_state(self.state_provider())
         level = self.level
         if level.kind == "card":
             return
@@ -422,6 +473,15 @@ class GameScreen:
                 self.app.exit()
         elif choice.kind == "back":
             self._back()
+        elif choice.kind == "opening_hand":
+            try:
+                state = self.choose_opening_hand(str(choice.value))
+            except (SessionConnectionError, ValueError, OSError) as error:
+                self.command_error = str(error)
+            else:
+                self.command_error = None
+                self.update_state(state)
+            self._invalidate()
         elif choice.kind == "inspect":
             corp, runner = self._players_by_role()
             corp_identity = corp.get("identity", {})

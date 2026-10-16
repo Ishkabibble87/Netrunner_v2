@@ -18,6 +18,30 @@ from anr_cli.terminal import get_terminal_input
 
 
 class MenuKeyboardTests(unittest.TestCase):
+    def test_opening_hand_choices_update_board_and_remove_prompt(self):
+        for decision, selection in (("keep", "\r"), ("mulligan", "\x1b[B\r")):
+            with self.subTest(decision=decision):
+                initial = {
+                    "viewer_role": "corp", "setup": {"pending_player": "corp"}, "turn": None,
+                    "you": {"role": "corp", "hand": [{"title": "Old hand"}]},
+                }
+                ready = {
+                    "viewer_role": "corp", "setup": {"pending_player": None},
+                    "turn": {"active_player": "corp", "phase": "action", "number": 1},
+                    "you": {"role": "corp", "clicks_remaining": 3, "hand": [{"title": "New hand"}] * 6},
+                }
+                callback = unittest.mock.Mock(return_value=ready)
+                screen = GameScreen(initial, {}, choose_opening_hand=callback)
+                self.assertIn("Choose your opening hand", screen._status_text())
+                with create_pipe_input() as keys, create_app_session(input=keys, output=DummyOutput()):
+                    keys.send_text(selection + "q")
+                    screen.run()
+                callback.assert_called_once_with(decision)
+                self.assertEqual(len(screen.hand), 6)
+                self.assertEqual(screen.you["clicks_remaining"], 3)
+                self.assertTrue(all(choice.kind != "opening_hand" for choice in screen.levels[0].choices))
+                self.assertEqual(screen._status_text(), "Your action phase · turn 1")
+
     def test_menu_selection_and_shortcuts(self):
         for text, expected in (
             ("\x1b[B\r", 1),  # Down.

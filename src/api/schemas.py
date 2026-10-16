@@ -9,7 +9,9 @@ from pydantic import BaseModel, ConfigDict, Field
 from content.cards.models import CardDefinition, CardSide, CardType
 from content.decks.models import PreconstructedDeck
 from content.opponents.models import OpponentProfile
-from game.models import CardZone, DeckSelection, GameState, PlayerRole, PlayerState
+from game.models import (
+    CardZone, DeckSelection, GameState, MulliganDecision, PlayerRole, PlayerState,
+)
 
 
 class ApiModel(BaseModel):
@@ -24,6 +26,16 @@ class CreateGameRequest(ApiModel):
 
 class DeckImportRequest(ApiModel):
     text: str
+
+
+class MulliganCommandRequest(ApiModel):
+    type: Literal["choose_mulligan"]
+    decision: MulliganDecision
+
+
+class SetupView(ApiModel):
+    pending_player: PlayerRole | None
+    decisions: dict[PlayerRole, MulliganDecision]
 
 
 class CardView(ApiModel):
@@ -57,12 +69,14 @@ class OpponentView(PlayerSummary):
 
 
 class InitialGameView(ApiModel):
-    """Initial state projection for one player; concealed cards stay hidden."""
+    """Current state projection for one player; concealed cards stay hidden."""
 
     game_id: UUID
     viewer_player_id: UUID
     viewer_role: PlayerRole
-    turn: TurnView
+    setup: SetupView
+    turn: TurnView | None
+    winner: PlayerRole | None
     you: OwnPlayerView
     opponent: OpponentView
     servers: list[str | int]
@@ -123,11 +137,13 @@ class InitialGameView(ApiModel):
             game_id=state.game_id,
             viewer_player_id=viewer_player_id,
             viewer_role=you.role,
+            setup=SetupView(**state.setup.model_dump()),
             turn=TurnView(
                 number=state.turn.number,
                 active_player=state.turn.active_player,
                 phase=state.turn.phase.value,
-            ),
+            ) if state.turn is not None else None,
+            winner=state.winner,
             you=OwnPlayerView(**player_summary(you).model_dump(), hand=own_hand),
             opponent=OpponentView(
                 **player_summary(opponent).model_dump(),
