@@ -4,8 +4,9 @@ import random
 from collections.abc import Mapping
 from uuid import UUID, uuid4
 
-from content.cards.models import CardDefinition, CardSide, CardType
+from content.cards.models import CardDefinition
 from content.opponents.models import OpponentProfile
+from game.deck_validation import DeckValidationError, validate_deck
 from game.models import (
     CardInstance,
     CardZone,
@@ -42,7 +43,6 @@ def create_ai_game(
             f"Unknown identity definition {decklist.identity_definition_id!r}"
         )
     player_role = PlayerRole(identity.side.value)
-    validate_deck_selection(decklist, player_role, card_definitions)
 
     opponent_role = (
         PlayerRole.RUNNER if player_role is PlayerRole.CORP else PlayerRole.CORP
@@ -52,6 +52,18 @@ def create_ai_game(
         raise GameSetupError(
             f"Opponent profile {opponent_profile.profile_id!r} has no {opponent_role.value} deck"
         )
+
+    selected_decks = {player_role: decklist, opponent_role: opponent_deck}
+    allowed_starter_identity_ids: set[str] = set()
+    for role, selection in selected_decks.items():
+        profile_selection = opponent_profile.deck_selections[role]
+        profile_identity = card_definitions.get(profile_selection.identity_definition_id)
+        if (
+            selection == profile_selection
+            and profile_identity is not None
+            and profile_identity.is_starter_only
+        ):
+            allowed_starter_identity_ids.add(profile_identity.definition_id)
 
     opponent_id = uuid4()
     if player_role is PlayerRole.CORP:
@@ -68,53 +80,8 @@ def create_ai_game(
         runner_player_id=runner_player_id,
         runner_deck=runner_deck,
         card_definitions=card_definitions,
+        allowed_starter_only_identity_ids=frozenset(allowed_starter_identity_ids),
     )
-
-
-def validate_deck_selection(
-    selection: DeckSelection,
-    role: PlayerRole,
-    card_definitions: Mapping[str, CardDefinition],
-) -> CardDefinition:
-    """Validate that a selection names known cards for the requested side.
-
-    This checks card references and sides only. Format legality is a separate
-    content concern and is not inferred from a deck import.
-    """
-
-    # TODO: Check deck-construction rules, including identity minimum size,
-    # influence limits, and per-card copy limits. This currently only verifies
-    # known definitions, sides, and enough cards for the opening hand.
-
-    identity = card_definitions.get(selection.identity_definition_id)
-    if identity is None:
-        raise GameSetupError(
-            f"Unknown identity definition {selection.identity_definition_id!r}"
-        )
-    expected_side = CardSide(role.value)
-    if identity.card_type is not CardType.IDENTITY:
-        raise GameSetupError(f"{identity.title!r} is not an identity")
-    if identity.side is not expected_side:
-        raise GameSetupError(f"{identity.title!r} is not a {role.value} identity")
-
-    main_deck_size = 0
-    for definition_id, count in selection.card_counts.items():
-        definition = card_definitions.get(definition_id)
-        if definition is None:
-            raise GameSetupError(f"Unknown card definition {definition_id!r}")
-        if definition.card_type is CardType.IDENTITY:
-            raise GameSetupError("An identity cannot be listed in the main deck")
-        if definition.side is not expected_side:
-            raise GameSetupError(
-                f"{definition.title!r} belongs to the opposite side"
-            )
-        main_deck_size += count
-
-    if main_deck_size < OPENING_HAND_SIZE:
-        raise GameSetupError(
-            f"The main deck needs at least {OPENING_HAND_SIZE} cards to deal an opening hand"
-        )
-    return identity
 
 
 def create_game_state(
@@ -125,18 +92,36 @@ def create_game_state(
     runner_player_id: UUID,
     runner_deck: DeckSelection,
     card_definitions: Mapping[str, CardDefinition],
+    allowed_starter_only_identity_ids: frozenset[str] = frozenset(),
     rng: random.Random | None = None,
 ) -> GameState:
     """Create unique card instances, shuffle both decks, and deal opening hands."""
 
     if corp_player_id == runner_player_id:
         raise GameSetupError("Corp and Runner must be different players")
-    corp_identity = validate_deck_selection(
-        corp_deck, PlayerRole.CORP, card_definitions
-    )
-    runner_identity = validate_deck_selection(
-        runner_deck, PlayerRole.RUNNER, card_definitions
-    )
+    try:
+        corp_identity = validate_deck(
+            corp_deck,
+            PlayerRole.CORP,
+            card_definitions,
+            allowed_starter_only_identity_ids=allowed_starter_only_identity_ids,
+        )
+        runner_identity = validate_deck(
+            runner_deck,
+            PlayerRole.RUNNER,
+            card_definitions,
+            allowed_starter_only_identity_ids=allowed_starter_only_identity_ids,
+        )
+    except DeckValidationError as error:
+        raise GameSetupError(str(error)) from error
+
+    if (
+        sum(corp_deck.card_counts.values()) < OPENING_HAND_SIZE
+        or sum(runner_deck.card_counts.values()) < OPENING_HAND_SIZE
+    ):
+        raise GameSetupError(
+            f"Each main deck needs at least {OPENING_HAND_SIZE} cards to deal an opening hand"
+        )
     source = rng if rng is not None else random.SystemRandom()
     game_id = game_id or uuid4()
     cards: dict[UUID, CardInstance] = {}

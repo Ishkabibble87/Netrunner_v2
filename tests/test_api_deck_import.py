@@ -66,6 +66,21 @@ class DeckImportApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["card_counts"], {"30030": 1})
 
+    def test_game_creation_rejects_a_deck_below_its_identity_minimum(self):
+        response = self.client.post(
+            "/games",
+            json={
+                "player_id": str(uuid4()),
+                "decklist": {
+                    "identity_definition_id": "30001",
+                    "card_counts": {"30030": 1},
+                },
+                "opponent_profile_id": "system-gateway-training",
+            },
+        )
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("at least 40 cards", response.json()["detail"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -88,6 +88,7 @@ def _definition_from_nsg_record(record: Any) -> CardDefinition:
         memory_cost=record.get("memory_cost"),
         influence_cost=record.get("faction_cost"),
         deck_limit=record.get("deck_limit"),
+        is_starter_only=record.get("is_starter_only", False),
         base_link=record.get("base_link"),
         minimum_deck_size=record.get("minimum_deck_size"),
         influence_limit=record.get("influence_limit"),

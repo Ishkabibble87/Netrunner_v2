@@ -1534,6 +1534,7 @@
     "base_link": 0,
     "code": "30076",
     "deck_limit": 1,
+    "is_starter_only": true,
     "faction_code": "neutral-runner",
     "flavor": "Are you ready to start something big?",
     "illustrator": "Benjamin Giletti",
@@ -1554,6 +1555,7 @@
   {
     "code": "30077",
     "deck_limit": 1,
+    "is_starter_only": true,
     "faction_code": "neutral-corp",
     "flavor": "You work for us. You just donʼt know it yet.",
     "illustrator": "Emilio Rodríguez",
