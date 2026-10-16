@@ -7,9 +7,9 @@ from threading import Lock
 from time import monotonic
 from uuid import UUID, uuid4
 
-from game.commands import ChooseMulligan
+from game.commands import ChooseMulligan, GameCommand
+from game.engine import apply_command
 from game.models import GameState, MulliganDecision, PlayerRole
-from game.setup import choose_mulligan
 
 
 def advance_ai_setup(state: GameState, ai_player_ids: set[UUID]) -> GameState:
@@ -22,7 +22,7 @@ def advance_ai_setup(state: GameState, ai_player_ids: set[UUID]) -> GameState:
         player = state.corp if state.setup.pending_player is PlayerRole.CORP else state.runner
         if player.player_id not in ai_player_ids:
             break
-        state = choose_mulligan(state, player.player_id, ChooseMulligan(MulliganDecision.KEEP))
+        state = apply_command(state, player.player_id, ChooseMulligan(MulliganDecision.KEEP))
     return state
 
 
@@ -141,9 +141,9 @@ class SessionStore:
             return self._authenticated(game_id, token)
 
     def submit(
-        self, game_id: UUID, token: str, command: ChooseMulligan,
+        self, game_id: UUID, token: str, command: GameCommand,
     ) -> tuple[GameSession, UUID]:
-        """Apply an authenticated mulligan choice and advance scripted setup.
+        """Apply an authenticated command and advance any scripted setup.
 
         Rule validation happens in the game layer. On success, replace the
         immutable state snapshot and increment its revision under the same lock,
@@ -151,7 +151,7 @@ class SessionStore:
         """
         with self._lock:
             session, player_id = self._authenticated(game_id, token)
-            state = choose_mulligan(session.state, player_id, command)
+            state = apply_command(session.state, player_id, command)
             session.state = advance_ai_setup(state, session.ai_player_ids)
             session.revision += 1
             return session, player_id

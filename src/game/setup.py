@@ -9,6 +9,7 @@ from collections.abc import Mapping
 from uuid import UUID, uuid4
 
 from content.cards.models import CardDefinition
+from .card_movement import draw_from_deck
 from .commands import ChooseMulligan
 from .deck_validation import DeckValidationError, validate_deck
 from .models import (
@@ -56,7 +57,7 @@ def choose_mulligan(
             card.location = ZoneLocation(
                 zone=CardZone.DECK, player_id=player_id, deck_position=position,
             )
-        _draw(result, player_id, OPENING_HAND_SIZE)
+        draw_from_deck(result, player_id, OPENING_HAND_SIZE)
 
     result.setup.decisions[role] = command.decision
     result.setup.pending_player = PlayerRole.RUNNER if role is PlayerRole.CORP else None
@@ -64,28 +65,12 @@ def choose_mulligan(
         # CR 5.6.1: gain three clicks, then draw without spending a click.
         result.corp.clicks_remaining = 3
         result.turn = TurnState(number=1, active_player=PlayerRole.CORP, phase=TurnPhase.DRAW)
-        if _draw(result, result.corp.player_id, 1):
+        if draw_from_deck(result, result.corp.player_id, 1):
             result.turn.phase = TurnPhase.ACTION
         else:
             # CR 1.7.2: an empty R&D on a mandatory draw ends the game.
             result.winner = PlayerRole.RUNNER
     return GameState.model_validate(result.model_dump())
-
-
-def _draw(state: GameState, player_id: UUID, count: int) -> bool:
-    """Move top cards into hand and close gaps in the remaining deck positions."""
-    deck = sorted(
-        (card for card in state.card_instances.values()
-         if card.location.zone is CardZone.DECK and card.location.player_id == player_id),
-        key=lambda card: card.location.deck_position,
-    )
-    for card in deck[:count]:
-        card.location = ZoneLocation(zone=CardZone.HAND, player_id=player_id)
-    for position, card in enumerate(deck[count:], start=1):
-        card.location = ZoneLocation(
-            zone=CardZone.DECK, player_id=player_id, deck_position=position,
-        )
-    return len(deck) >= count
 
 
 def create_game_state(

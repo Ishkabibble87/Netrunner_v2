@@ -28,7 +28,6 @@ from content.decks.models import PreconstructedDeck
 from content.opponents.loader import load_opponent_profiles
 from content.opponents.models import OpponentProfile
 from game.models import DeckSelection
-from game.commands import ChooseMulligan
 from game.setup import IllegalCommand
 
 from .schemas import (
@@ -37,10 +36,11 @@ from .schemas import (
     DeckImportRequest,
     GameCreatedResponse,
     InitialGameView,
-    MulliganCommandRequest,
+    PlayerCommandRequest,
     OpponentProfileSummary,
     PreconstructedDeckResponse,
     SessionSnapshot,
+    game_command_from_request,
 )
 
 
@@ -197,14 +197,15 @@ def create_app(
     @api.post("/games/{game_id}/commands", response_model=SessionSnapshot)
     async def submit_command(
         game_id: UUID,
-        request: MulliganCommandRequest,
+        request: PlayerCommandRequest,
         token: Annotated[str, Depends(player_token)],
     ) -> SessionSnapshot:
+        """Apply one authenticated command and publish viewer-specific snapshots."""
         # Keep commits and broadcasts in order when multiple clients submit.
         async with command_lock:
             try:
                 session, player_id = sessions.submit(
-                    game_id, token, ChooseMulligan(request.decision),
+                    game_id, token, game_command_from_request(request),
                 )
             except IllegalCommand as error:
                 raise HTTPException(status_code=409, detail=str(error)) from error
