@@ -115,6 +115,11 @@ class GameScreen:
                         choices.append(
                             MenuChoice("Mulligan · shuffle and draw five", "opening_hand", decision)
                         )
+                elif action_type == "play_card" and self.submit_action is not None:
+                    card = next((c for c in self.hand if c["instance_id"] == action["card_instance_id"]), None)
+                    if card is not None:
+                        cost = self.card_catalog.get(card["definition_id"], {}).get("play_cost", "?")
+                        choices.append(MenuChoice(f"Play {card['title']} · {cost} credits", "action", dict(action)))
                 elif action_type == "discard_cards" and self.submit_action is not None:
                     choices.append(MenuChoice(f"Discard {action['required_count']} cards", "discard", action))
                 elif self.submit_action is not None:

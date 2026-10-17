@@ -1,0 +1,38 @@
+{
+  "30075": [
+    {
+      "type": "gain_credits",
+      "amount": 9
+    }
+  ],
+  "30030": [
+    {
+      "type": "gain_credits",
+      "amount": 9
+    }
+  ],
+  "30064": [
+    {
+      "type": "gain_credits",
+      "amount": 15
+    }
+  ],
+  "30020": [
+    {
+      "type": "gain_credits",
+      "amount": 5
+    },
+    {
+      "type": "lose_click_if_any"
+    }
+  ],
+  "30021": [
+    {
+      "type": "draw_cards",
+      "amount": 4
+    },
+    {
+      "type": "lose_click_if_any"
+    }
+  ]
+}
