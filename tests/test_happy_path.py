@@ -1,120 +1,175 @@
-"""One representative API path, extended for each new action or playable card type."""
+"""A growing game path through real content, application setup, and commands.
 
+Each named step checks its checkpoint before the next step runs. Extend this
+scenario as gameplay grows; HTTP transport and CLI interaction belong elsewhere.
+"""
+
+from collections import Counter
+from pathlib import Path
 import unittest
 from uuid import uuid4
 
-from fastapi.testclient import TestClient
+from application.game_setup import create_ai_game
+from application.sessions import GameSession, SessionStore
+from content.cards.loader import load_nsg_card_definitions
+from content.decks.deck_importer import load_nrdb_deck
+from content.opponents.loader import load_opponent_profiles
+from game.commands import ChooseMulligan, DrawCard, GainCredit, PurgeVirusCounters
+from game.engine import legal_actions_for
+from game.models import CardZone, DeckSelection, GameState, MulliganDecision, PlayerRole, TurnPhase
 
-from api.app import create_app
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 class GameProgressTests(unittest.TestCase):
-    """Track core gameplay progress through the same API used by the CLI."""
+    """Follow one Corp player from deck selection into a game against the AI."""
 
-    def test_player_starts_ai_game_mulligans_and_uses_basic_actions(self):
-        with TestClient(create_app()) as client:
-            opponents_response = client.get("/opponent-profiles")
-            self.assertEqual(opponents_response.status_code, 200)
-            opponents = opponents_response.json()
-            self.assertTrue(opponents, "The player needs an AI opponent to select")
-            opponent = opponents[0]
+    def test_game_path(self):
+        self.cards = load_nsg_card_definitions(
+            PROJECT_ROOT / "content/cards/system-gateway/cards.json"
+        )
+        self.sessions = SessionStore()
+        self.addCleanup(self.sessions.clear)
 
-            decks_response = client.get("/preconstructed-decks")
-            self.assertEqual(decks_response.status_code, 200)
-            corp_deck = next(
-                deck["decklist"]
-                for deck in decks_response.json()
-                if deck["role"] == "corp"
-            )
+        deck = self.select_and_parse_deck()
+        session = self.select_opponent_and_start_game(deck)
+        state = self.mulligan_while_opponent_keeps(session)
+        self.assert_corp_first_turn_started(state)
+        self.take_basic_actions(session)
 
-            created_response = client.post(
-                "/games",
-                json={
-                    "player_id": str(uuid4()),
-                    "decklist": corp_deck,
-                    "opponent_profile_id": opponent["profile_id"],
-                },
-            )
-            self.assertEqual(created_response.status_code, 201, created_response.text)
-            created = created_response.json()
-            self.assertEqual(created["opponent_profile_id"], opponent["profile_id"])
+    def select_and_parse_deck(self) -> DeckSelection:
+        deck = load_nrdb_deck(
+            PROJECT_ROOT / "content/decks/system-gateway/starter-corp.txt", self.cards
+        )
+        self.assertEqual(
+            self.cards[deck.identity_definition_id].title,
+            "The Syndicate: Profit over Principle",
+        )
+        self.assertEqual(sum(deck.card_counts.values()), 34)
+        self.assertEqual(
+            {self.cards[card_id].title: count for card_id, count in deck.card_counts.items()},
+            {
+                "Offworld Office": 3, "Send a Message": 2, "Superconducting Hub": 2,
+                "Nico Campaign": 2, "Urtica Cipher": 2, "Regolith Mining License": 2,
+                "Manegarm Skunkworks": 1, "Seamless Launch": 2, "Government Subsidy": 2,
+                "Hedge Fund": 3, "Brân 1.0": 2, "Palisade": 3, "Diviner": 2,
+                "Whitespace": 2, "Karunā": 2, "Tithe": 2,
+            },
+        )
+        return deck
 
-            initial_state = created["initial_state"]
-            self.assertEqual(initial_state["viewer_role"], "corp")
-            self.assertEqual(initial_state["setup"]["pending_player"], "corp")
-            self.assertEqual(len(initial_state["you"]["hand"]), 5)
-            self.assertEqual(
-                [action["decision"] for action in initial_state["legal_actions"]],
-                ["keep", "mulligan"],
-            )
-
-            game_id = initial_state["game_id"]
-            game_path = f"/games/{game_id}"
-            headers = {"Authorization": f"Bearer {created['player_token']}"}
-
-            with client.websocket_connect(
-                f"{game_path}/events", headers=headers
-            ) as events:
-                first_snapshot = events.receive_json()
-                self.assertEqual(first_snapshot["revision"], 0)
-                self.assertEqual(first_snapshot["state"], initial_state)
-
-                mulligan_response = client.post(
-                    f"{game_path}/commands",
-                    headers=headers,
-                    json={"type": "choose_mulligan", "decision": "mulligan"},
-                )
-                self.assertEqual(mulligan_response.status_code, 200, mulligan_response.text)
-                mulligan_state = mulligan_response.json()["state"]
-                self.assertIsNone(mulligan_state["setup"]["pending_player"])
+    def select_opponent_and_start_game(self, deck: DeckSelection) -> GameSession:
+        opponent = load_opponent_profiles(self.cards)["system-gateway-training"]
+        player_id = uuid4()
+        game = create_ai_game(
+            player_id=player_id,
+            decklist=deck,
+            opponent_profile=opponent,
+            card_definitions=self.cards,
+        )
+        session = self.sessions.create(game, opponent.profile_id, [player_id])
+        state = session.state
+        self.assertEqual(session.opponent_profile_id, opponent.profile_id)
+        self.assertEqual(state.corp.player_id, player_id)
+        self.assertEqual(state.corp.deck_selection, deck)
+        self.assertEqual(state.runner.deck_selection, opponent.deck_selections[PlayerRole.RUNNER])
+        self.assertIsNone(state.turn)
+        self.assertIsNone(state.winner)
+        self.assertEqual(state.setup.pending_player, PlayerRole.CORP)
+        self.assertEqual(state.setup.decisions, {})
+        for player in (state.corp, state.runner):
+            with self.subTest(opening_player=player.role):
+                self.assertEqual(player.credits, 5)
+                self.assertEqual(player.clicks_remaining, 0)
+                self.assertEqual(len(self.cards_in_zone(state, player.player_id, CardZone.HAND)), 5)
                 self.assertEqual(
-                    mulligan_state["setup"]["decisions"],
-                    {"corp": "mulligan", "runner": "keep"},
-                )
-                self.assertEqual(
-                    mulligan_state["turn"],
-                    {"number": 1, "active_player": "corp", "phase": "action"},
-                )
-                self.assertEqual(len(mulligan_state["you"]["hand"]), 6)
-                self.assertEqual(
-                    mulligan_state["you"]["deck_count"],
-                    initial_state["you"]["deck_count"] - 1,
+                    len(self.cards_in_zone(state, player.player_id, CardZone.DECK)),
+                    sum(player.deck_selection.card_counts.values()) - 5,
                 )
                 self.assertEqual(
-                    [action["type"] for action in mulligan_state["legal_actions"]],
-                    ["gain_credit", "draw_card", "purge_virus_counters"],
+                    Counter(card.definition_id for card in state.card_instances.values()
+                            if card.owner_id == player.player_id and card.location.zone != CardZone.IDENTITY),
+                    Counter(player.deck_selection.card_counts),
                 )
-                self.assertEqual(events.receive_json()["state"], mulligan_state)
+        self.assertEqual(
+            legal_actions_for(state, player_id),
+            (ChooseMulligan(MulliganDecision.KEEP), ChooseMulligan(MulliganDecision.MULLIGAN)),
+        )
+        self.assertEqual(legal_actions_for(state, state.runner.player_id), ())
+        return session
 
-                hand_size = len(mulligan_state["you"]["hand"])
-                deck_count = mulligan_state["you"]["deck_count"]
-                clicks = mulligan_state["you"]["clicks_remaining"]
-                draw_response = client.post(
-                    f"{game_path}/commands",
-                    headers=headers,
-                    json={"type": "draw_card"},
-                )
-                self.assertEqual(draw_response.status_code, 200, draw_response.text)
-                draw_state = draw_response.json()["state"]
-                self.assertEqual(len(draw_state["you"]["hand"]), hand_size + 1)
-                self.assertEqual(draw_state["you"]["deck_count"], deck_count - 1)
-                self.assertEqual(draw_state["you"]["clicks_remaining"], clicks - 1)
-                self.assertEqual(events.receive_json()["state"], draw_state)
+    def mulligan_while_opponent_keeps(self, session: GameSession) -> GameState:
+        before = session.state
+        runner_hand = self.cards_in_zone(before, before.runner.player_id, CardZone.HAND)
+        token = session.player_tokens[before.corp.player_id]
+        updated, player_id = self.sessions.submit(
+            before.game_id, token, ChooseMulligan(MulliganDecision.MULLIGAN)
+        )
+        state = updated.state
+        self.assertEqual(player_id, before.corp.player_id)
+        self.assertIsNone(state.setup.pending_player)
+        self.assertEqual(state.setup.decisions, {
+            PlayerRole.CORP: MulliganDecision.MULLIGAN,
+            PlayerRole.RUNNER: MulliganDecision.KEEP,
+        })
+        self.assertEqual(self.cards_in_zone(state, state.runner.player_id, CardZone.HAND), runner_hand)
+        # Mulligans reuse physical copies; drawing the same cards again is legal.
+        self.assertEqual(state.card_instances.keys(), before.card_instances.keys())
+        self.assertEqual(state.runner, before.runner)
+        return state
 
-                credits = draw_state["you"]["credits"]
-                gain_response = client.post(
-                    f"{game_path}/commands",
-                    headers=headers,
-                    json={"type": "gain_credit"},
-                )
-                self.assertEqual(gain_response.status_code, 200, gain_response.text)
-                gain_state = gain_response.json()["state"]
-                self.assertEqual(gain_state["you"]["credits"], credits + 1)
-                self.assertEqual(gain_state["you"]["clicks_remaining"], clicks - 2)
-                self.assertEqual(events.receive_json()["state"], gain_state)
+    def assert_corp_first_turn_started(self, state: GameState) -> None:
+        self.assertIsNotNone(state.turn)
+        self.assertEqual(state.turn.number, 1)
+        self.assertEqual(state.turn.active_player, PlayerRole.CORP)
+        self.assertEqual(state.turn.phase, TurnPhase.ACTION)
+        self.assertIsNone(state.winner)
+        self.assertEqual(state.corp.credits, 5)
+        self.assertEqual(state.corp.clicks_remaining, 3)
+        self.assertEqual(len(self.cards_in_zone(state, state.corp.player_id, CardZone.HAND)), 6)
+        self.assertEqual(len(self.cards_in_zone(state, state.corp.player_id, CardZone.DECK)), 28)
+        self.assertEqual(
+            legal_actions_for(state, state.corp.player_id),
+            (GainCredit(), DrawCard(), PurgeVirusCounters()),
+        )
+        self.assertEqual(legal_actions_for(state, state.runner.player_id), ())
+
+    def take_basic_actions(self, session: GameSession) -> None:
+        before = session.state
+        player_id = before.corp.player_id
+        token = session.player_tokens[player_id]
+        hand = self.cards_in_zone(before, player_id, CardZone.HAND)
+        deck = self.cards_in_zone(before, player_id, CardZone.DECK)
+        top_card = next(card.instance_id for card in deck.values() if card.location.deck_position == 1)
+
+        session, _ = self.sessions.submit(before.game_id, token, DrawCard())
+        drawn = session.state
+        self.assertEqual(set(self.cards_in_zone(drawn, player_id, CardZone.HAND)), set(hand) | {top_card})
+        self.assertEqual(set(self.cards_in_zone(drawn, player_id, CardZone.DECK)), set(deck) - {top_card})
+        self.assertEqual(drawn.corp.clicks_remaining, 2)
+        self.assertEqual(drawn.corp.credits, 5)
+        self.assertEqual(legal_actions_for(drawn, player_id), (GainCredit(), DrawCard()))
+
+        session, _ = self.sessions.submit(before.game_id, token, GainCredit())
+        gained = session.state
+        self.assertEqual(gained.corp.credits, 6)
+        self.assertEqual(gained.corp.clicks_remaining, 1)
+        self.assertEqual(self.cards_in_zone(gained, player_id, CardZone.HAND),
+                         self.cards_in_zone(drawn, player_id, CardZone.HAND))
+        self.assertEqual(self.cards_in_zone(gained, player_id, CardZone.DECK),
+                         self.cards_in_zone(drawn, player_id, CardZone.DECK))
+        self.assertEqual(gained.runner, before.runner)
+        self.assertEqual(gained.turn, before.turn)
+
+    @staticmethod
+    def cards_in_zone(state, player_id, zone):
+        """Select physical cards without relying on shuffled order or random IDs."""
+        return {
+            card.instance_id: card for card in state.card_instances.values()
+            if card.location.player_id == player_id and card.location.zone is zone
+        }
 
 
 if __name__ == "__main__":
     unittest.main()
-
-
