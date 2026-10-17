@@ -1,11 +1,13 @@
 """Process-local game sessions; run the API with a single worker."""
 
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from secrets import compare_digest, token_urlsafe
 from threading import Lock
 from time import monotonic
 from uuid import UUID, uuid4
+
+from content.cards.models import CardDefinition
 
 from game.commands import ChooseMulligan, DiscardCards, DiscardSelection, GainCredit, GameCommand
 from game.engine import apply_command, legal_actions_for
@@ -163,6 +165,7 @@ class SessionStore:
 
     def submit(
         self, game_id: UUID, token: str, command: GameCommand,
+        *, card_definitions: Mapping[str, CardDefinition] | None = None,
     ) -> tuple[GameSession, UUID]:
         """Apply an authenticated command and advance scripted opponent decisions.
 
@@ -172,7 +175,7 @@ class SessionStore:
         """
         with self._lock:
             session, player_id = self._authenticated(game_id, token)
-            state = apply_command(session.state, player_id, command)
+            state = apply_command(session.state, player_id, command, card_definitions)
             session.state = advance_ai_decisions(state, session.ai_player_ids)
             session.revision += 1
             return session, player_id

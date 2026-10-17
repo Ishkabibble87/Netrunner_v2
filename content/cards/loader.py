@@ -44,6 +44,18 @@ def load_nsg_card_definitions(path: str | Path) -> dict[str, CardDefinition]:
             )
         definitions[definition.definition_id] = definition
 
+    abilities_path = source_path.with_name("abilities.json")
+    if abilities_path.exists():
+        abilities = json.loads(abilities_path.read_text(encoding="utf-8"))
+        if not isinstance(abilities, dict):
+            raise ValueError(f"Expected an object of play instructions in {abilities_path}")
+        for definition_id, instructions in abilities.items():
+            if definition_id not in definitions:
+                raise ValueError(f"Unknown card definition {definition_id!r} in {abilities_path}")
+            # Validate authored data instead of trusting model_copy updates.
+            data = definitions[definition_id].model_dump()
+            data["play_instructions"] = instructions
+            definitions[definition_id] = CardDefinition.model_validate(data)
     return definitions
 
 

@@ -8,13 +8,14 @@ from collections import Counter
 from pathlib import Path
 import unittest
 from uuid import uuid4
+from unittest.mock import patch
 
 from application.game_setup import create_ai_game
 from application.sessions import GameSession, SessionStore
 from content.cards.loader import load_nsg_card_definitions
 from content.decks.deck_importer import load_nrdb_deck
 from content.opponents.loader import load_opponent_profiles
-from game.commands import ChooseMulligan, DiscardCards, DiscardSelection, DrawCard, GainCredit, PurgeVirusCounters
+from game.commands import ChooseMulligan, DiscardCards, DiscardSelection, DrawCard, GainCredit, PlayCard, PurgeVirusCounters
 from game.engine import legal_actions_for
 from game.models import CardZone, DeckSelection, GameState, MulliganDecision, PlayerRole, TurnPhase
 
@@ -26,6 +27,11 @@ class GameProgressTests(unittest.TestCase):
     """Follow one Corp player from deck selection into a game against the AI."""
 
     def test_game_path(self):
+        # Keep economy cards available while the growing scenario stays reproducible.
+        class OpeningOrder:
+            def shuffle(self, cards):
+                cards.sort(key=lambda card_id: {"30075": 0, "30064": 1}.get(getattr(card_id, "definition_id", card_id), 2))
+        self.enterContext(patch("game.setup.random.SystemRandom", return_value=OpeningOrder()))
         self.cards = load_nsg_card_definitions(
             PROJECT_ROOT / "content/cards/system-gateway/cards.json"
         )
@@ -38,6 +44,7 @@ class GameProgressTests(unittest.TestCase):
         self.assert_corp_first_turn_started(state)
         self.take_basic_actions(session)
         self.discard_and_continue_after_opponent_turn(session)
+        self.play_economy_cards_and_continue(session)
 
     def select_and_parse_deck(self) -> DeckSelection:
         deck = load_nrdb_deck(
@@ -173,7 +180,8 @@ class GameProgressTests(unittest.TestCase):
         selection, = legal_actions_for(state, state.corp.player_id)
         self.assertIsInstance(selection, DiscardSelection)
         self.assertEqual(selection.required_count, 2)
-        chosen = selection.eligible_card_instance_ids[:2]
+        chosen = tuple(i for i in selection.eligible_card_instance_ids
+                       if state.card_instances[i].definition_id not in {"30075", "30064"})[:2]
         session, _ = self.sessions.submit(state.game_id, token, DiscardCards(chosen))
         state = session.state
         self.assertEqual(state.turn.active_player, PlayerRole.CORP)
@@ -185,6 +193,28 @@ class GameProgressTests(unittest.TestCase):
         for instance_id in chosen:
             self.assertEqual(state.card_instances[instance_id].location.zone, CardZone.DISCARD_PILE)
             self.assertFalse(state.card_instances[instance_id].face_up)
+
+    def play_economy_cards_and_continue(self, session: GameSession) -> None:
+        """Play separate physical economy cards, then finish the whole turn."""
+        state = session.state
+        player_id = state.corp.player_id
+        token = session.player_tokens[player_id]
+        for definition_id in ("30075", "30075", "30064"):
+            before = session.state
+            instance = next(card for card in self.cards_in_zone(before, player_id, CardZone.HAND).values()
+                            if card.definition_id == definition_id)
+            command = PlayCard(instance.instance_id)
+            self.assertIn(command, legal_actions_for(before, player_id, self.cards))
+            session, _ = self.sessions.submit(before.game_id, token, command, card_definitions=self.cards)
+            state = session.state
+            self.assertEqual(state.corp.credits, before.corp.credits + (5 if definition_id == "30064" else 4))
+            self.assertEqual(state.card_instances[instance.instance_id].location.zone, CardZone.DISCARD_PILE)
+            self.assertTrue(state.card_instances[instance.instance_id].face_up)
+            self.assertEqual(before.card_instances[instance.instance_id].location.zone, CardZone.HAND)
+        self.assertEqual(state.turn.number, 5)
+        self.assertEqual(state.turn.active_player, PlayerRole.CORP)
+        self.assertEqual(state.corp.clicks_remaining, 3)
+        self.assertEqual(state.runner.credits, 13)
 
     @staticmethod
     def cards_in_zone(state, player_id, zone):

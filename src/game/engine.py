@@ -4,8 +4,12 @@ The engine owns command legality and state changes. API and CLI layers may
 display legal actions, but every submitted command is validated again here.
 """
 
+from collections.abc import Mapping
 from uuid import UUID
 
+from content.cards.models import CardDefinition
+
+from .card_play import play_card, validate_card_play
 from .card_movement import draw_from_deck
 from .commands import (
     ChooseMulligan,
@@ -14,6 +18,7 @@ from .commands import (
     DiscardSelection,
     GameCommand,
     GainCredit,
+    PlayCard,
     PurgeVirusCounters,
     RemoveTag,
 )
@@ -25,7 +30,10 @@ from .setup import IllegalCommand, choose_mulligan
 from .turns import advance_turn, hand_cards, maximum_hand_size
 
 
-def legal_actions_for(state: GameState, player_id: UUID) -> tuple[GameCommand | DiscardSelection, ...]:
+def legal_actions_for(
+    state: GameState, player_id: UUID,
+    card_definitions: Mapping[str, CardDefinition] | None = None,
+) -> tuple[GameCommand | DiscardSelection, ...]:
     """Return commands currently available to one player, in menu order.
 
     This is a player-specific projection of the current state. It is not a
@@ -66,10 +74,20 @@ def legal_actions_for(state: GameState, player_id: UUID) -> tuple[GameCommand | 
             actions.append(RemoveTag())
     elif player.clicks_remaining >= 3:
         actions.append(PurgeVirusCounters())
+    if card_definitions is not None:
+        for card in hand_cards(state, player):
+            try:
+                validate_card_play(state, player, card.instance_id, card_definitions)
+            except IllegalCommand:
+                continue
+            actions.append(PlayCard(card.instance_id))
     return tuple(actions)
 
 
-def apply_command(state: GameState, player_id: UUID, command: GameCommand) -> GameState:
+def apply_command(
+    state: GameState, player_id: UUID, command: GameCommand,
+    card_definitions: Mapping[str, CardDefinition] | None = None,
+) -> GameState:
     """Validate and apply one command, returning a new validated snapshot."""
     if isinstance(command, ChooseMulligan):
         return choose_mulligan(state, player_id, command)
@@ -97,7 +115,11 @@ def apply_command(state: GameState, player_id: UUID, command: GameCommand) -> Ga
         return GameState.model_validate(result.model_dump())
     _validate_action_window(state, player)
 
-    if isinstance(command, GainCredit):
+    if isinstance(command, PlayCard):
+        result = state.model_copy(deep=True)
+        play_card(result, _player_for_role(result, player.role), command.card_instance_id,
+                  card_definitions if card_definitions is not None else {})
+    elif isinstance(command, GainCredit):
         result = state.model_copy(deep=True)
         _player_for_role(result, player.role).clicks_remaining -= 1
         _player_for_role(result, player.role).credits += 1

@@ -24,6 +24,7 @@ from game.commands import (
     DiscardSelection,
     GameCommand,
     GainCredit,
+    PlayCard,
     PurgeVirusCounters,
     RemoveTag,
 )
@@ -73,6 +74,13 @@ class RemoveTagCommandRequest(ApiModel):
     type: Literal["remove_tag"]
 
 
+class PlayCardCommandRequest(ApiModel):
+    """Identify the physical copy; costs and instructions are server-owned."""
+
+    type: Literal["play_card"]
+    card_instance_id: UUID
+
+
 class DiscardCardsCommandRequest(ApiModel):
     """Submit the complete set of excess cards; the engine checks eligibility."""
 
@@ -108,7 +116,8 @@ PlayerCommandRequest = Annotated[
     | DrawCardCommandRequest
     | RemoveTagCommandRequest
     | PurgeVirusCountersCommandRequest
-    | DiscardCardsCommandRequest,
+    | DiscardCardsCommandRequest
+    | PlayCardCommandRequest,
     Field(discriminator="type"),
 ]
 
@@ -118,6 +127,8 @@ LegalAction = PlayerCommandRequest | DiscardCardsAction
 
 def game_command_from_request(request: PlayerCommandRequest) -> GameCommand:
     """Translate a validated API command into the transport-independent game type."""
+    if isinstance(request, PlayCardCommandRequest):
+        return PlayCard(request.card_instance_id)
     if isinstance(request, DiscardCardsCommandRequest):
         return DiscardCards(tuple(request.card_instance_ids))
     if isinstance(request, MulliganCommandRequest):
@@ -135,6 +146,8 @@ def game_command_from_request(request: PlayerCommandRequest) -> GameCommand:
 
 def command_request_from_game(command: GameCommand | DiscardSelection) -> LegalAction:
     """Project a domain command into the shape clients can submit and display."""
+    if isinstance(command, PlayCard):
+        return PlayCardCommandRequest(type="play_card", card_instance_id=command.card_instance_id)
     if isinstance(command, DiscardSelection):
         return DiscardCardsAction(eligible_card_instance_ids=list(command.eligible_card_instance_ids),
                                  required_count=command.required_count)
@@ -287,7 +300,7 @@ class InitialGameView(ApiModel):
             decision=DecisionView(**decision.model_dump()) if decision else None,
             legal_actions=[
                 command_request_from_game(command)
-                for command in legal_actions_for(state, viewer_player_id)
+                for command in legal_actions_for(state, viewer_player_id, card_definitions)
             ],
             you=OwnPlayerView(**player_summary(you).model_dump(), hand=own_hand),
             opponent=OpponentView(
@@ -361,4 +374,4 @@ class CardCatalogEntry(ApiModel):
 
     @classmethod
     def from_definition(cls, definition: CardDefinition) -> "CardCatalogEntry":
-        return cls(**definition.model_dump())
+        return cls(**definition.model_dump(exclude={"play_instructions"}))

@@ -1,11 +1,12 @@
 """Normalized static card definitions used by the game engine.
 
 Set membership and printings are intentionally modeled separately from a card
-definition. Structured executable abilities can be added when the first card
-effect is implemented; printed rules text is retained only for display.
+definition. Executable play instructions are authored separately from imported printed
+rules text, which is retained only for display.
 """
 
 from enum import StrEnum
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -32,6 +33,23 @@ class CardType(StrEnum):
     RESOURCE = "resource"
 
 
+class GainCredits(CardContentModel):
+    type: Literal["gain_credits"]
+    amount: int = Field(gt=0)
+
+
+class DrawCards(CardContentModel):
+    type: Literal["draw_cards"]
+    amount: int = Field(gt=0)
+
+
+class LoseClickIfAny(CardContentModel):
+    type: Literal["lose_click_if_any"]
+
+
+PlayInstruction = Annotated[GainCredits | DrawCards | LoseClickIfAny, Field(discriminator="type")]
+
+
 class CardDefinition(CardContentModel):
     """Static gameplay and display data for one card identity."""
 
@@ -45,6 +63,9 @@ class CardDefinition(CardContentModel):
     faction_code: str = Field(min_length=1)
     subtypes: tuple[str, ...] = ()
     printed_text: str = ""
+    play_instructions: tuple[PlayInstruction, ...] | None = Field(
+        default=None, description="Authored executable instructions; None means unsupported",
+    )
     is_unique: bool = False
 
     play_cost: int | None = Field(default=None, ge=0)
