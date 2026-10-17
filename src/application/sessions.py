@@ -14,6 +14,8 @@ from game.commands import (
     DiscardSelection,
     GainCredit,
     GameCommand,
+    PassPriority,
+    ResolveReaction,
 )
 from game.engine import apply_command, legal_actions_for
 from game.models import GameState, MulliganDecision, PlayerRole
@@ -41,7 +43,8 @@ def advance_ai_decisions(state: GameState, ai_player_ids: set[UUID]) -> GameStat
     """
     state = advance_ai_setup(state, ai_player_ids)
     while state.winner is None and state.turn is not None:
-        player = state.corp if state.turn.active_player is PlayerRole.CORP else state.runner
+        role = state.window.player if state.window else state.turn.active_player
+        player = state.corp if role is PlayerRole.CORP else state.runner
         if player.player_id not in ai_player_ids:
             break
         actions = legal_actions_for(state, player.player_id)
@@ -49,7 +52,7 @@ def advance_ai_decisions(state: GameState, ai_player_ids: set[UUID]) -> GameStat
             break
         selection = next((a for a in actions if isinstance(a, DiscardSelection)), None)
         command = (DiscardCards(selection.eligible_card_instance_ids[:selection.required_count])
-                   if selection else GainCredit())
+                   if selection else next((a for a in actions if isinstance(a, (ResolveReaction, PassPriority))), GainCredit()))
         state = apply_command(state, player.player_id, command)
     return state
 

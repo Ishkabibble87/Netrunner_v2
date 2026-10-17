@@ -18,17 +18,23 @@ from content.cards.models import CardDefinition, CardSide, CardType
 from content.decks.models import PreconstructedDeck
 from content.opponents.models import OpponentProfile
 from game.commands import (
+    AdvanceCard,
     ChooseMulligan,
     DiscardCards,
     DiscardSelection,
     DrawCard,
     GainCredit,
     GameCommand,
+    InstallCard,
+    PassPriority,
     PlayCard,
     PurgeVirusCounters,
     RemoveTag,
+    ResolveReaction,
+    ScoreAgenda,
 )
 from game.engine import legal_actions_for, pending_decision
+from game.installation import agenda_points
 from game.models import (
     CardZone,
     DeckSelection,
@@ -36,6 +42,7 @@ from game.models import (
     MulliganDecision,
     PlayerRole,
     PlayerState,
+    ServerId,
 )
 from game.turns import maximum_hand_size
 
@@ -105,7 +112,7 @@ class DecisionView(ApiModel):
     """Public context shared by both players, never hidden card choices."""
 
     player: PlayerRole
-    type: Literal["choose_opening_hand", "choose_action", "discard_to_hand_limit"]
+    type: Literal["choose_opening_hand", "choose_action", "discard_to_hand_limit", "paid_ability_window", "resolve_reaction"]
     cards_to_discard: int | None = None
 
 
@@ -115,6 +122,32 @@ class PurgeVirusCountersCommandRequest(ApiModel):
     type: Literal["purge_virus_counters"]
 
 
+class InstallCardCommandRequest(ApiModel):
+    type: Literal["install_card"]
+    card_instance_id: UUID
+    server_id: ServerId | Literal["new_remote"]
+    trash_card_instance_ids: list[UUID] = Field(default_factory=list)
+
+
+class AdvanceCardCommandRequest(ApiModel):
+    type: Literal["advance_card"]
+    card_instance_id: UUID
+
+
+class ScoreAgendaCommandRequest(ApiModel):
+    type: Literal["score_agenda"]
+    card_instance_id: UUID
+
+
+class PassPriorityCommandRequest(ApiModel):
+    type: Literal["pass_priority"]
+
+
+class ResolveReactionCommandRequest(ApiModel):
+    type: Literal["resolve_reaction"]
+    card_instance_id: UUID
+
+
 PlayerCommandRequest = Annotated[
     MulliganCommandRequest
     | GainCreditCommandRequest
@@ -122,7 +155,12 @@ PlayerCommandRequest = Annotated[
     | RemoveTagCommandRequest
     | PurgeVirusCountersCommandRequest
     | DiscardCardsCommandRequest
-    | PlayCardCommandRequest,
+    | PlayCardCommandRequest
+    | InstallCardCommandRequest
+    | AdvanceCardCommandRequest
+    | ScoreAgendaCommandRequest
+    | PassPriorityCommandRequest
+    | ResolveReactionCommandRequest,
     Field(discriminator="type"),
 ]
 
@@ -134,6 +172,16 @@ def game_command_from_request(request: PlayerCommandRequest) -> GameCommand:
     """Translate a validated API command into the transport-independent game type."""
     if isinstance(request, PlayCardCommandRequest):
         return PlayCard(request.card_instance_id)
+    if isinstance(request, InstallCardCommandRequest):
+        return InstallCard(request.card_instance_id, request.server_id, tuple(request.trash_card_instance_ids))
+    if isinstance(request, AdvanceCardCommandRequest):
+        return AdvanceCard(request.card_instance_id)
+    if isinstance(request, ScoreAgendaCommandRequest):
+        return ScoreAgenda(request.card_instance_id)
+    if isinstance(request, PassPriorityCommandRequest):
+        return PassPriority()
+    if isinstance(request, ResolveReactionCommandRequest):
+        return ResolveReaction(request.card_instance_id)
     if isinstance(request, DiscardCardsCommandRequest):
         return DiscardCards(tuple(request.card_instance_ids))
     if isinstance(request, MulliganCommandRequest):
@@ -153,6 +201,17 @@ def command_request_from_game(command: GameCommand | DiscardSelection) -> LegalA
     """Project a domain command into the shape clients can submit and display."""
     if isinstance(command, PlayCard):
         return PlayCardCommandRequest(type="play_card", card_instance_id=command.card_instance_id)
+    if isinstance(command, InstallCard):
+        return InstallCardCommandRequest(type="install_card", card_instance_id=command.card_instance_id,
+            server_id=command.server_id, trash_card_instance_ids=list(command.trash_card_instance_ids))
+    if isinstance(command, AdvanceCard):
+        return AdvanceCardCommandRequest(type="advance_card", card_instance_id=command.card_instance_id)
+    if isinstance(command, ScoreAgenda):
+        return ScoreAgendaCommandRequest(type="score_agenda", card_instance_id=command.card_instance_id)
+    if isinstance(command, PassPriority):
+        return PassPriorityCommandRequest(type="pass_priority")
+    if isinstance(command, ResolveReaction):
+        return ResolveReactionCommandRequest(type="resolve_reaction", card_instance_id=command.card_instance_id)
     if isinstance(command, DiscardSelection):
         return DiscardCardsAction(eligible_card_instance_ids=list(command.eligible_card_instance_ids),
                                  required_count=command.required_count)
@@ -183,6 +242,18 @@ class CardView(ApiModel):
     card_type: CardType
 
 
+class InstalledCardView(ApiModel):
+    """Public position and counters, with identity concealed from the Runner."""
+
+    instance_id: UUID
+    server_id: ServerId
+    area: str
+    ice_distance_from_server: int | None
+    face_up: bool
+    counters: dict[str, int]
+    card: CardView | None
+
+
 class TurnView(ApiModel):
     number: int
     active_player: PlayerRole
@@ -200,6 +271,8 @@ class PlayerSummary(ApiModel):
     identity: CardView
     deck_count: int
     maximum_hand_size: int
+    agenda_points: int
+    score_area: list[CardView]
     discard_count: int
     discard_pile: list[CardView]
 
@@ -228,6 +301,7 @@ class InitialGameView(ApiModel):
     you: OwnPlayerView
     opponent: OpponentView
     servers: list[str | int]
+    installed_cards: list[InstalledCardView]
 
     @classmethod
     def from_game_state(
@@ -258,6 +332,9 @@ class InitialGameView(ApiModel):
         def player_summary(player: PlayerState) -> PlayerSummary:
             identity = card_view(player.identity_card_instance_id)
             return PlayerSummary(
+                agenda_points=agenda_points(state, player, card_definitions),
+                score_area=[card_view(c.instance_id) for c in state.card_instances.values()
+                            if c.location.zone is CardZone.SCORE_AREA and c.location.player_id == player.player_id],
                 player_id=player.player_id,
                 role=player.role,
                 credits=player.credits,
@@ -312,6 +389,12 @@ class InitialGameView(ApiModel):
                 **player_summary(opponent).model_dump(),
                 hand_count=opponent_hand_count,
             ),
+            installed_cards=[InstalledCardView(
+                instance_id=c.instance_id, server_id=c.location.server.server_id,
+                area=c.location.server.area.value, ice_distance_from_server=c.location.server.ice_distance_from_server,
+                face_up=bool(c.face_up), counters=c.counters,
+                card=card_view(c.instance_id) if c.face_up or c.controller_id == viewer_player_id else None)
+                for c in state.card_instances.values() if c.installed and c.location.server],
             servers=[
                 server.value if hasattr(server, "value") else server
                 for server in state.servers
@@ -379,4 +462,4 @@ class CardCatalogEntry(ApiModel):
 
     @classmethod
     def from_definition(cls, definition: CardDefinition) -> "CardCatalogEntry":
-        return cls(**definition.model_dump(exclude={"play_instructions"}))
+        return cls(**definition.model_dump(exclude={"play_instructions", "score_instructions"}))

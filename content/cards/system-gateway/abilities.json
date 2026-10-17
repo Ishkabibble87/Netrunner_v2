@@ -34,5 +34,13 @@
     {
       "type": "lose_click_if_any"
     }
-  ]
+  ],
+  "30067": {
+    "score_instructions": [
+      {
+        "type": "gain_credits",
+        "amount": 7
+      }
+    ]
+  }
 }

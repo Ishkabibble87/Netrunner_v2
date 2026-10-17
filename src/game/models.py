@@ -240,12 +240,25 @@ class TurnState(DomainModel):
     number: int = Field(ge=1)
     active_player: PlayerRole
     phase: TurnPhase
+    step: Literal["start", "mandatory_draw", "before_action", "action", "discard", "end"] = "action"
 
     @model_validator(mode="after")
     def runner_has_no_draw_phase(self) -> "TurnState":
         if self.active_player is PlayerRole.RUNNER and self.phase is TurnPhase.DRAW:
             raise ValueError("The Runner does not have a draw phase")
         return self
+
+
+class PriorityWindow(DomainModel):
+    """A scoring window or reaction, with a continuation in TurnState.step.
+
+    Players without supported choices pass automatically. Empty scoring windows
+    remain visible while Corp cards are installed, concealing agenda eligibility.
+    """
+
+    kind: Literal["paid", "reaction"]
+    player: PlayerRole
+    pending_card_ids: list[UUID] = Field(default_factory=list)
 
 
 class GameState(DomainModel):
@@ -257,6 +270,7 @@ class GameState(DomainModel):
     setup: SetupState = Field(default_factory=SetupState)
     turn: TurnState | None = None
     winner: PlayerRole | None = None
+    window: PriorityWindow | None = None
     servers: list[ServerId] = Field(default_factory=lambda: list(CentralServer))
     card_instances: dict[UUID, CardInstance] = Field(default_factory=dict)
 
@@ -345,5 +359,5 @@ class PendingDecision(DomainModel):
     """Public decision context, excluding private cards and executable choices."""
 
     player: PlayerRole
-    type: Literal["choose_opening_hand", "choose_action", "discard_to_hand_limit"]
+    type: Literal["choose_opening_hand", "choose_action", "discard_to_hand_limit", "paid_ability_window", "resolve_reaction"]
     cards_to_discard: int | None = None

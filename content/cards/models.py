@@ -50,6 +50,13 @@ class LoseClickIfAny(CardContentModel):
 PlayInstruction = Annotated[GainCredits | DrawCards | LoseClickIfAny, Field(discriminator="type")]
 
 
+class AuthoredAbilities(CardContentModel):
+    """Executable instructions authored separately from imported display metadata."""
+
+    play_instructions: tuple[PlayInstruction, ...] | None = None
+    score_instructions: tuple[PlayInstruction, ...] | None = None
+
+
 class CardDefinition(CardContentModel):
     """Static gameplay and display data for one card identity."""
 
@@ -66,6 +73,7 @@ class CardDefinition(CardContentModel):
     play_instructions: tuple[PlayInstruction, ...] | None = Field(
         default=None, description="Authored executable instructions; None means unsupported",
     )
+    score_instructions: tuple[PlayInstruction, ...] | None = None
     is_unique: bool = False
 
     play_cost: int | None = Field(default=None, ge=0)
