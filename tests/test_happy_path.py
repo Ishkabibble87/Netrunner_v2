@@ -14,7 +14,14 @@ from application.sessions import GameSession, SessionStore
 from content.cards.loader import load_nsg_card_definitions
 from content.decks.deck_importer import load_nrdb_deck
 from content.opponents.loader import load_opponent_profiles
-from game.commands import ChooseMulligan, DiscardCards, DiscardSelection, DrawCard, GainCredit, PurgeVirusCounters
+from game.commands import (
+    ChooseMulligan,
+    DiscardCards,
+    DiscardSelection,
+    DrawCard,
+    GainCredit,
+    PurgeVirusCounters,
+)
 from game.engine import legal_actions_for
 from game.models import (
     CardZone,
