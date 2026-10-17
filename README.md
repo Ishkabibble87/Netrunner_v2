@@ -39,3 +39,13 @@ uv run --project clients/cli anr
 ```
 
 The current CLI can start a game against a scripted opponent using a preconstructed deck or an imported NetrunnerDB deck file. Host Game and Join Game are not implemented yet. Game sessions are kept in memory and are cleared when the backend stops.
+
+## Lint
+
+From the repository root, check the API, shared content, CLI, and tests:
+
+```bash
+uv run ruff check .
+```
+
+Apply safe automatic fixes with `uv run ruff check . --fix`.

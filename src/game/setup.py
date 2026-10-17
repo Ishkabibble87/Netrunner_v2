@@ -9,12 +9,21 @@ from collections.abc import Mapping
 from uuid import UUID, uuid4
 
 from content.cards.models import CardDefinition
+
 from .card_movement import draw_from_deck
 from .commands import ChooseMulligan
 from .deck_validation import DeckValidationError, validate_deck
 from .models import (
-    CardInstance, CardZone, DeckSelection, GameState, MulliganDecision,
-    PlayerRole, PlayerState, TurnPhase, TurnState, ZoneLocation,
+    CardInstance,
+    CardZone,
+    DeckSelection,
+    GameState,
+    MulliganDecision,
+    PlayerRole,
+    PlayerState,
+    TurnPhase,
+    TurnState,
+    ZoneLocation,
 )
 
 OPENING_HAND_SIZE = 5

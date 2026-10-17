@@ -2,7 +2,9 @@
 
 import unittest
 from uuid import uuid4
+
 from fastapi.testclient import TestClient
+
 from api.app import create_app
 from application.game_setup import create_ai_game
 from application.sessions import SessionStore

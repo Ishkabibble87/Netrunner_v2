@@ -19,19 +19,24 @@ from content.decks.models import PreconstructedDeck
 from content.opponents.models import OpponentProfile
 from game.commands import (
     ChooseMulligan,
-    DrawCard,
     DiscardCards,
     DiscardSelection,
-    GameCommand,
+    DrawCard,
     GainCredit,
+    GameCommand,
     PurgeVirusCounters,
     RemoveTag,
 )
 from game.engine import legal_actions_for, pending_decision
-from game.turns import maximum_hand_size
 from game.models import (
-    CardZone, DeckSelection, GameState, MulliganDecision, PlayerRole, PlayerState,
+    CardZone,
+    DeckSelection,
+    GameState,
+    MulliganDecision,
+    PlayerRole,
+    PlayerState,
 )
+from game.turns import maximum_hand_size
 
 
 class ApiModel(BaseModel):
