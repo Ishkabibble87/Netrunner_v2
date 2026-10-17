@@ -8,8 +8,13 @@ from time import monotonic
 from uuid import UUID, uuid4
 
 from content.cards.models import CardDefinition
-
-from game.commands import ChooseMulligan, DiscardCards, DiscardSelection, GainCredit, GameCommand
+from game.commands import (
+    ChooseMulligan,
+    DiscardCards,
+    DiscardSelection,
+    GainCredit,
+    GameCommand,
+)
 from game.engine import apply_command, legal_actions_for
 from game.models import GameState, MulliganDecision, PlayerRole
 

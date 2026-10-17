@@ -4,21 +4,35 @@ Each named step checks its checkpoint before the next step runs. Extend this
 scenario as gameplay grows; HTTP transport and CLI interaction belong elsewhere.
 """
 
+import unittest
 from collections import Counter
 from pathlib import Path
-import unittest
-from uuid import uuid4
 from unittest.mock import patch
+from uuid import uuid4
 
 from application.game_setup import create_ai_game
 from application.sessions import GameSession, SessionStore
 from content.cards.loader import load_nsg_card_definitions
 from content.decks.deck_importer import load_nrdb_deck
 from content.opponents.loader import load_opponent_profiles
-from game.commands import ChooseMulligan, DiscardCards, DiscardSelection, DrawCard, GainCredit, PlayCard, PurgeVirusCounters
+from game.commands import (
+    ChooseMulligan,
+    DiscardCards,
+    DiscardSelection,
+    DrawCard,
+    GainCredit,
+    PlayCard,
+    PurgeVirusCounters,
+)
 from game.engine import legal_actions_for
-from game.models import CardZone, DeckSelection, GameState, MulliganDecision, PlayerRole, TurnPhase
-
+from game.models import (
+    CardZone,
+    DeckSelection,
+    GameState,
+    MulliganDecision,
+    PlayerRole,
+    TurnPhase,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 

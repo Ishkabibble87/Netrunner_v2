@@ -5,6 +5,7 @@ helper as basic actions; no printed prose is interpreted at runtime.
 """
 
 from content.cards.models import DrawCards, GainCredits, LoseClickIfAny, PlayInstruction
+
 from .card_movement import draw_from_deck
 from .models import GameState, PlayerRole, PlayerState
 

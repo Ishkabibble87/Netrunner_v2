@@ -8,7 +8,6 @@ from pydantic import ValidationError
 
 from .models import CardDefinition, CardSide, CardType
 
-
 _CORP_REZZABLE_TYPES = {CardType.ASSET, CardType.ICE, CardType.UPGRADE}
 _RUNNER_INSTALLABLE_TYPES = {CardType.HARDWARE, CardType.PROGRAM, CardType.RESOURCE}
 

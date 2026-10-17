@@ -7,7 +7,9 @@ without duplicating the common lifecycle or introducing API-specific rules.
 
 from collections.abc import Mapping
 from uuid import UUID
+
 from content.cards.models import CardDefinition, CardType
+
 from .effects import resolve_effect
 from .models import CardZone, GameState, PlayerRole, PlayerState, ZoneLocation
 from .setup import IllegalCommand

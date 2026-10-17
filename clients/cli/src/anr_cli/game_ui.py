@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from html import unescape
-import re
 from typing import Any, Callable
 
 from prompt_toolkit.application import Application
@@ -22,9 +22,9 @@ from prompt_toolkit.layout.scrollable_pane import ScrollablePane
 from prompt_toolkit.styles import Style
 from prompt_toolkit.widgets import Frame
 
-from .terminal import get_terminal_input
 from .navigation import navigation_bindings
 from .session import SessionConnectionError
+from .terminal import get_terminal_input
 
 
 @dataclass
