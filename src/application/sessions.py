@@ -1,18 +1,21 @@
 """Process-local game sessions; run the API with a single worker."""
 
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from secrets import compare_digest, token_urlsafe
 from threading import Lock
 from time import monotonic
 from uuid import UUID, uuid4
 
+from content.cards.models import CardDefinition
 from game.commands import (
     ChooseMulligan,
     DiscardCards,
     DiscardSelection,
     GainCredit,
     GameCommand,
+    PassPriority,
+    ResolveReaction,
 )
 from game.engine import apply_command, legal_actions_for
 from game.models import GameState, MulliganDecision, PlayerRole
@@ -40,7 +43,8 @@ def advance_ai_decisions(state: GameState, ai_player_ids: set[UUID]) -> GameStat
     """
     state = advance_ai_setup(state, ai_player_ids)
     while state.winner is None and state.turn is not None:
-        player = state.corp if state.turn.active_player is PlayerRole.CORP else state.runner
+        role = state.window.player if state.window else state.turn.active_player
+        player = state.corp if role is PlayerRole.CORP else state.runner
         if player.player_id not in ai_player_ids:
             break
         actions = legal_actions_for(state, player.player_id)
@@ -48,7 +52,7 @@ def advance_ai_decisions(state: GameState, ai_player_ids: set[UUID]) -> GameStat
             break
         selection = next((a for a in actions if isinstance(a, DiscardSelection)), None)
         command = (DiscardCards(selection.eligible_card_instance_ids[:selection.required_count])
-                   if selection else GainCredit())
+                   if selection else next((a for a in actions if isinstance(a, (ResolveReaction, PassPriority))), GainCredit()))
         state = apply_command(state, player.player_id, command)
     return state
 
@@ -169,6 +173,7 @@ class SessionStore:
 
     def submit(
         self, game_id: UUID, token: str, command: GameCommand,
+        *, card_definitions: Mapping[str, CardDefinition] | None = None,
     ) -> tuple[GameSession, UUID]:
         """Apply an authenticated command and advance scripted opponent decisions.
 
@@ -178,7 +183,7 @@ class SessionStore:
         """
         with self._lock:
             session, player_id = self._authenticated(game_id, token)
-            state = apply_command(session.state, player_id, command)
+            state = apply_command(session.state, player_id, command, card_definitions)
             session.state = advance_ai_decisions(state, session.ai_player_ids)
             session.revision += 1
             return session, player_id

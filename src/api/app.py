@@ -206,6 +206,7 @@ def create_app(
             try:
                 session, player_id = sessions.submit(
                     game_id, token, game_command_from_request(request),
+                    card_definitions=definitions,
                 )
             except IllegalCommand as error:
                 raise HTTPException(status_code=409, detail=str(error)) from error

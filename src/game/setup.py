@@ -5,7 +5,8 @@ The supported starter identities have no such abilities.
 """
 
 import random
-from collections.abc import Mapping
+from collections import Counter
+from collections.abc import Mapping, Sequence
 from uuid import UUID, uuid4
 
 from content.cards.models import CardDefinition
@@ -25,6 +26,7 @@ from .models import (
     TurnState,
     ZoneLocation,
 )
+from .turns import advance_turn
 
 OPENING_HAND_SIZE = 5
 STARTING_CREDITS = 5
@@ -71,14 +73,10 @@ def choose_mulligan(
     result.setup.decisions[role] = command.decision
     result.setup.pending_player = PlayerRole.RUNNER if role is PlayerRole.CORP else None
     if result.setup.pending_player is None:
-        # CR 5.6.1: gain three clicks, then draw without spending a click.
+        # CR 5.6.1: start the Corp turn, including its pre-draw scoring window.
         result.corp.clicks_remaining = 3
-        result.turn = TurnState(number=1, active_player=PlayerRole.CORP, phase=TurnPhase.DRAW)
-        if draw_from_deck(result, result.corp.player_id, 1):
-            result.turn.phase = TurnPhase.ACTION
-        else:
-            # CR 1.7.2: an empty R&D on a mandatory draw ends the game.
-            result.winner = PlayerRole.RUNNER
+        result.turn = TurnState(number=1, active_player=PlayerRole.CORP, phase=TurnPhase.DRAW, step="start")
+        advance_turn(result)
     return GameState.model_validate(result.model_dump())
 
 
@@ -92,8 +90,14 @@ def create_game_state(
     card_definitions: Mapping[str, CardDefinition],
     allowed_starter_only_identity_ids: frozenset[str] = frozenset(),
     rng: random.Random | None = None,
+    deck_orders: Mapping[PlayerRole, Sequence[str]] | None = None,
 ) -> GameState:
-    """Validate both selections, create unique copies, shuffle, and deal hands."""
+    """Validate selections, create physical copies, and deal five-card hands.
+
+    An optional complete top-to-bottom order replaces a role's initial shuffle.
+    This internal injection supports reproducible scenarios; mulligans still
+    shuffle normally unless their existing RNG dependency is supplied separately.
+    """
 
     if corp_player_id == runner_player_id:
         raise ValueError("Corp and Runner must be different players")
@@ -158,9 +162,14 @@ def create_game_state(
             for definition_id, count in selection.card_counts.items()
             for _ in range(count)
         ]
-        # TODO: Allow callers to provide a top-to-bottom deck order so tests can
-        # deal known opening hands without depending on shuffle seeds.
-        source.shuffle(shuffled)
+        selection_role = PlayerRole.CORP if player_id == corp_player_id else PlayerRole.RUNNER
+        order = (deck_orders or {}).get(selection_role)
+        if order is None:
+            source.shuffle(shuffled)
+        else:
+            if Counter(order) != Counter(selection.card_counts):
+                raise DeckValidationError(f"The {selection_role.value} deck order must contain every selected copy exactly once")
+            shuffled = list(order)
         for definition_id in shuffled[:OPENING_HAND_SIZE]:
             add_card(definition_id, player_id, CardZone.HAND)
         for position, definition_id in enumerate(

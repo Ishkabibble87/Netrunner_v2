@@ -115,10 +115,29 @@ class GameScreen:
                         choices.append(
                             MenuChoice("Mulligan · shuffle and draw five", "opening_hand", decision)
                         )
+                elif action_type == "play_card" and self.submit_action is not None:
+                    card = next((c for c in self.hand if c["instance_id"] == action["card_instance_id"]), None)
+                    if card is not None:
+                        cost = self.card_catalog.get(card["definition_id"], {}).get("play_cost", "?")
+                        choices.append(MenuChoice(f"Play {card['title']} · {cost} credits", "action", dict(action)))
+                elif action_type == "install_card" and self.submit_action is not None:
+                    card = next((c for c in self.hand if c["instance_id"] == action["card_instance_id"]), None)
+                    if card:
+                        target = "new remote" if action["server_id"] == "new_remote" else self._server_label(action["server_id"])
+                        replacement = " · replace existing card" if action.get("trash_card_instance_ids") else ""
+                        choices.append(MenuChoice(f"Install {card['title']} in {target}{replacement}", "action", dict(action)))
+                elif action_type in {"advance_card", "score_agenda", "resolve_reaction"} and self.submit_action is not None:
+                    installed = [c["card"] for c in self.state.get("installed_cards", []) if c.get("card")]
+                    scored = self.state.get("you", {}).get("score_area", [])
+                    card = next((c for c in installed + scored if c["instance_id"] == action["card_instance_id"]), {})
+                    verb = {"advance_card": "Advance", "score_agenda": "Score", "resolve_reaction": "Resolve scoring ability:"}[action_type]
+                    suffix = " · 1 credit" if action_type == "advance_card" else ""
+                    choices.append(MenuChoice(f"{verb} {card.get('title', 'agenda')}{suffix}", "action", dict(action)))
                 elif action_type == "discard_cards" and self.submit_action is not None:
                     choices.append(MenuChoice(f"Discard {action['required_count']} cards", "discard", action))
                 elif self.submit_action is not None:
                     label = {
+                        "pass_priority": "Pass priority",
                         "gain_credit": "Gain 1 credit",
                         "draw_card": "Draw 1 card",
                         "remove_tag": "Remove 1 tag · 2 credits",
@@ -309,7 +328,9 @@ class GameScreen:
         for title, items in (
             ("SERVERS", self._server_names()),
             ("RIG", ["Programs", "Hardware", "Resources"]),
-            ("SCORE AREA", ["Corp: no agendas scored", "Runner: no agendas scored"]),
+            ("SCORE AREA", [f"{role}: {player.get('agenda_points', 0)} points · " +
+                            (", ".join(c["title"] for c in player.get("score_area", [])) or "no agendas scored")
+                            for role, player in (("Corp", corp), ("Runner", runner))]),
         ):
             if compact:
                 line(f"{title}: {' · '.join(items)}")
@@ -364,7 +385,10 @@ class GameScreen:
             line(breadcrumb, "class:muted")
         line(self.level.title.upper(), "class:section")
         if self.level.kind == "server":
-            line("This initial snapshot does not include installed card details.", "class:muted")
+            for card in self.state.get("installed_cards", []):
+                if card["server_id"] == self.level.data:
+                    title = card["card"]["title"] if card.get("card") else "Facedown card"
+                    line(f"{title} · {card['area']} · {card.get('counters', {}).get('advancement', 0)} advancement")
             line()
         elif self.level.kind == "rig":
             line("Programs")
@@ -450,7 +474,18 @@ class GameScreen:
         return int(player.get("hand_count", 0))
 
     def _server_names(self) -> list[str]:
-        return [self._server_label(server) for server in self.state.get("servers", [])]
+        rows = []
+        for server in self.state.get("servers", []):
+            cards = [c for c in self.state.get("installed_cards", []) if c["server_id"] == server]
+            labels = []
+            for card in cards:
+                label = card["card"]["title"] if card.get("card") else "Facedown card"
+                label += f" ({card['area']})"
+                if card.get("counters", {}).get("advancement"):
+                    label += f" · {card['counters']['advancement']} advancement"
+                labels.append(label)
+            rows.append(self._server_label(server) + (": " + ", ".join(labels) if labels else ""))
+        return rows
 
     def _status_text(self) -> str:
         winner = self.state.get("winner")
@@ -462,6 +497,9 @@ class GameScreen:
                 return "Choose your opening hand · one mulligan allowed"
             return f"Waiting for {str(pending).title()} opening-hand choice"
         decision = self.state.get("decision") or {}
+        if decision.get("type") in {"paid_ability_window", "resolve_reaction"}:
+            who = "You" if decision["player"] == self.viewer_role else str(decision["player"]).title()
+            return f"{who}: " + ("scoring window · score or pass" if decision["type"] == "paid_ability_window" else "resolve scoring reaction")
         if decision.get("type") == "discard_to_hand_limit":
             who = "You" if decision["player"] == self.viewer_role else str(decision["player"]).title()
             return f"{who} must discard {decision['cards_to_discard']} cards"
@@ -632,7 +670,7 @@ class GameScreen:
                     self._server_label(choice.value),
                     "server",
                     [MenuChoice("Back", "back")],
-                    data=self._server_label(choice.value),
+                    data=choice.value,
                 )
             )
         elif choice.kind == "hand":

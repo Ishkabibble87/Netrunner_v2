@@ -4,18 +4,36 @@ The engine owns command legality and state changes. API and CLI layers may
 display legal actions, but every submitted command is validated again here.
 """
 
+from collections.abc import Mapping
 from uuid import UUID
 
+from content.cards.models import CardDefinition
+
 from .card_movement import draw_from_deck
+from .card_play import play_card, validate_card_play
 from .commands import (
+    AdvanceCard,
     ChooseMulligan,
     DiscardCards,
     DiscardSelection,
     DrawCard,
     GainCredit,
     GameCommand,
+    InstallCard,
+    PassPriority,
+    PlayCard,
     PurgeVirusCounters,
     RemoveTag,
+    ResolveReaction,
+    ScoreAgenda,
+)
+from .effects import resolve_effect
+from .installation import (
+    agenda_points,
+    install_card,
+    installed_agenda,
+    remove_empty_remotes,
+    validate_install,
 )
 from .models import (
     CardZone,
@@ -24,6 +42,7 @@ from .models import (
     PendingDecision,
     PlayerRole,
     PlayerState,
+    PriorityWindow,
     TurnPhase,
     ZoneLocation,
 )
@@ -31,7 +50,10 @@ from .setup import IllegalCommand, choose_mulligan
 from .turns import advance_turn, hand_cards, maximum_hand_size
 
 
-def legal_actions_for(state: GameState, player_id: UUID) -> tuple[GameCommand | DiscardSelection, ...]:
+def legal_actions_for(
+    state: GameState, player_id: UUID,
+    card_definitions: Mapping[str, CardDefinition] | None = None,
+) -> tuple[GameCommand | DiscardSelection, ...]:
     """Return commands currently available to one player, in menu order.
 
     This is a player-specific projection of the current state. It is not a
@@ -49,6 +71,22 @@ def legal_actions_for(state: GameState, player_id: UUID) -> tuple[GameCommand | 
             ChooseMulligan(MulliganDecision.KEEP),
             ChooseMulligan(MulliganDecision.MULLIGAN),
         )
+
+    definitions = card_definitions or {}
+    if state.window is not None:
+        if state.window.player is not player.role:
+            return ()
+        if state.window.kind == "reaction":
+            return tuple(ResolveReaction(i) for i in state.window.pending_card_ids)
+        actions = []
+        for card in state.card_instances.values():
+            try:
+                _, definition = installed_agenda(state, player, card.instance_id, definitions)
+            except IllegalCommand:
+                continue
+            if card.counters.get("advancement", 0) >= definition.advancement_requirement:
+                actions.append(ScoreAgenda(card.instance_id))
+        return (*actions, PassPriority())
 
     if (state.turn is not None and state.turn.phase is TurnPhase.DISCARD
             and state.turn.active_player is player.role):
@@ -72,10 +110,47 @@ def legal_actions_for(state: GameState, player_id: UUID) -> tuple[GameCommand | 
             actions.append(RemoveTag())
     elif player.clicks_remaining >= 3:
         actions.append(PurgeVirusCounters())
+    if card_definitions is not None:
+        for card in hand_cards(state, player):
+            try:
+                validate_card_play(state, player, card.instance_id, card_definitions)
+            except IllegalCommand:
+                continue
+            actions.append(PlayCard(card.instance_id))
+    if player.role is PlayerRole.CORP:
+        for card in state.card_instances.values():
+            try:
+                installed_agenda(state, player, card.instance_id, definitions)
+            except IllegalCommand:
+                pass
+            else:
+                if player.credits >= 1:
+                    actions.append(AdvanceCard(card.instance_id))
+        for card in hand_cards(state, player):
+            for target in (*state.servers, "new_remote"):
+                # Offer mandatory replacement trashing; optional trash choices can
+                # also be submitted through the generic install command.
+                definition = definitions.get(card.definition_id)
+                replacements = tuple(c.instance_id for c in state.card_instances.values()
+                    if c.location.server and c.location.server.server_id == target
+                    and c.location.server.area.value == "root"
+                    and definition is not None
+                    and ((definition.card_type.value in {"agenda", "asset"}
+                          and definitions[c.definition_id].card_type.value in {"agenda", "asset"})
+                         or ("Region" in definition.subtypes and "Region" in definitions[c.definition_id].subtypes)))
+                command = InstallCard(card.instance_id, target, replacements)
+                try:
+                    validate_install(state, player, command, definitions)
+                except IllegalCommand:
+                    continue
+                actions.append(command)
     return tuple(actions)
 
 
-def apply_command(state: GameState, player_id: UUID, command: GameCommand) -> GameState:
+def apply_command(
+    state: GameState, player_id: UUID, command: GameCommand,
+    card_definitions: Mapping[str, CardDefinition] | None = None,
+) -> GameState:
     """Validate and apply one command, returning a new validated snapshot."""
     if isinstance(command, ChooseMulligan):
         return choose_mulligan(state, player_id, command)
@@ -83,8 +158,50 @@ def apply_command(state: GameState, player_id: UUID, command: GameCommand) -> Ga
     player = _player_for_id(state, player_id)
     if player is None:
         raise IllegalCommand("Player is not part of this game")
+    if isinstance(command, (PassPriority, ScoreAgenda, ResolveReaction)):
+        if state.winner is not None or state.window is None or state.window.player is not player.role:
+            raise IllegalCommand("You do not have priority in a window")
+        result = state.model_copy(deep=True)
+        actor = _player_for_role(result, player.role)
+        definitions = card_definitions or {}
+        if isinstance(command, PassPriority):
+            if result.window.kind != "paid":
+                raise IllegalCommand("Resolve mandatory reactions before passing")
+            # The opponent currently has no supported options in these windows.
+            result.window = None
+        elif isinstance(command, ScoreAgenda):
+            if (result.window.kind != "paid" or result.turn.active_player is not PlayerRole.CORP
+                    or result.turn.phase not in {TurnPhase.DRAW, TurnPhase.ACTION}):
+                raise IllegalCommand("Score only during an eligible Corp paid ability window")
+            card, definition = installed_agenda(result, actor, command.card_instance_id, definitions)
+            if card.counters.get("advancement", 0) < definition.advancement_requirement:
+                raise IllegalCommand("The agenda has not met its advancement requirement")
+            result.card_instances[card.instance_id] = card.model_copy(update={
+                "installed": False, "rezzed": False, "face_up": True, "counters": {},
+                "location": ZoneLocation(zone=CardZone.SCORE_AREA, player_id=actor.player_id)})
+            remove_empty_remotes(result)
+            # CR 1.17.2: the victory checkpoint precedes scoring reactions.
+            if agenda_points(result, actor, definitions) >= 7:
+                result.winner = player.role
+                result.window = None
+            elif definition.score_instructions:
+                result.window = PriorityWindow(kind="reaction", player=player.role,
+                                               pending_card_ids=[card.instance_id])
+        else:
+            if result.window.kind != "reaction" or command.card_instance_id not in result.window.pending_card_ids:
+                raise IllegalCommand("Choose a pending reaction")
+            card = result.card_instances[command.card_instance_id]
+            for instruction in definitions[card.definition_id].score_instructions:
+                resolve_effect(result, actor, instruction)
+                if result.winner is not None:
+                    break
+            result.window.pending_card_ids.remove(card.instance_id)
+            if not result.window.pending_card_ids:
+                result.window = PriorityWindow(kind="paid", player=PlayerRole.CORP)
+        advance_turn(result)
+        return GameState.model_validate(result.model_dump())
     if isinstance(command, DiscardCards):
-        if (state.winner is not None or state.setup.pending_player is not None
+        if (state.winner is not None or state.window is not None or state.setup.pending_player is not None
                 or state.turn is None or state.turn.phase is not TurnPhase.DISCARD
                 or state.turn.active_player is not player.role):
             raise IllegalCommand("Discard only during your discard decision")
@@ -103,7 +220,23 @@ def apply_command(state: GameState, player_id: UUID, command: GameCommand) -> Ga
         return GameState.model_validate(result.model_dump())
     _validate_action_window(state, player)
 
-    if isinstance(command, GainCredit):
+    if isinstance(command, InstallCard):
+        result = state.model_copy(deep=True)
+        install_card(result, _player_for_role(result, player.role), command, card_definitions or {})
+    elif isinstance(command, AdvanceCard):
+        result = state.model_copy(deep=True)
+        actor = _player_for_role(result, player.role)
+        card, _ = installed_agenda(result, actor, command.card_instance_id, card_definitions or {})
+        if actor.credits < 1:
+            raise IllegalCommand("Advancing costs 1 credit")
+        actor.credits -= 1
+        actor.clicks_remaining -= 1
+        card.counters["advancement"] = card.counters.get("advancement", 0) + 1
+    elif isinstance(command, PlayCard):
+        result = state.model_copy(deep=True)
+        play_card(result, _player_for_role(result, player.role), command.card_instance_id,
+                  card_definitions if card_definitions is not None else {})
+    elif isinstance(command, GainCredit):
         result = state.model_copy(deep=True)
         _player_for_role(result, player.role).clicks_remaining -= 1
         _player_for_role(result, player.role).credits += 1
@@ -139,12 +272,15 @@ def apply_command(state: GameState, player_id: UUID, command: GameCommand) -> Ga
     else:
         raise IllegalCommand("Unsupported command")
 
+    result.turn.step = "before_action"
     advance_turn(result)
     return GameState.model_validate(result.model_dump())
 
 
 def _validate_action_window(state: GameState, player: PlayerState) -> None:
     """Reject actions outside the authenticated player's action window."""
+    if state.window is not None:
+        raise IllegalCommand("Finish the current priority window first")
     if state.winner is not None:
         raise IllegalCommand("The game has already ended")
     if state.setup.pending_player is not None:
@@ -176,6 +312,8 @@ def pending_decision(state: GameState) -> PendingDecision | None:
         return None
     if state.setup.pending_player is not None:
         return PendingDecision(player=state.setup.pending_player, type="choose_opening_hand")
+    if state.window is not None:
+        return PendingDecision(player=state.window.player, type=("paid_ability_window" if state.window.kind == "paid" else "resolve_reaction"))
     if state.turn is None:
         return None
     player = _player_for_role(state, state.turn.active_player)

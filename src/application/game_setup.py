@@ -1,6 +1,6 @@
 """Build the initial authoritative game state from two deck selections."""
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from uuid import UUID, uuid4
 
 from content.cards.models import CardDefinition
@@ -23,6 +23,7 @@ def create_ai_game(
     decklist: DeckSelection,
     opponent_profile: OpponentProfile,
     card_definitions: Mapping[str, CardDefinition],
+    deck_orders: Mapping[PlayerRole, Sequence[str]] | None = None,
 ) -> GameState:
     """Create an initial game using the client's decklist and a selected AI profile."""
 
@@ -66,6 +67,7 @@ def create_ai_game(
     try:
         return create_game_state(
             game_id=uuid4(),
+            deck_orders=deck_orders,
             corp_player_id=corp_player_id,
             corp_deck=corp_deck,
             runner_player_id=runner_player_id,
