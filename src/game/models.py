@@ -261,6 +261,24 @@ class PriorityWindow(DomainModel):
     pending_card_ids: list[UUID] = Field(default_factory=list)
 
 
+class RunState(DomainModel):
+    """A paused unprotected run; card visibility lasts only through its breach.
+
+    Remote cleanup is deferred until the run ends because remote IDs are display
+    positions and may be renumbered when the accessed card leaves its server.
+    """
+
+    server_id: ServerId
+    phase: Literal["movement", "breach", "access"] = "movement"
+    successful: bool = False
+    access_limit: int = Field(default=1, ge=1)
+    central_accesses: int = Field(default=0, ge=0)
+    accessed_card_ids: list[UUID] = Field(default_factory=list)
+    visible_card_ids: list[UUID] = Field(default_factory=list)
+    current_card_id: UUID | None = None
+    bad_publicity_credits: int = Field(default=0, ge=0)
+
+
 class GameState(DomainModel):
     """Authoritative state from opening-hand decisions through play."""
 
@@ -271,6 +289,7 @@ class GameState(DomainModel):
     turn: TurnState | None = None
     winner: PlayerRole | None = None
     window: PriorityWindow | None = None
+    run: RunState | None = None
     servers: list[ServerId] = Field(default_factory=lambda: list(CentralServer))
     card_instances: dict[UUID, CardInstance] = Field(default_factory=dict)
 
@@ -340,6 +359,20 @@ class GameState(DomainModel):
                         "Each player can have only their selected identity in the identity zone"
                     )
 
+        if self.run is not None:
+            if (self.window is not None or self.setup.pending_player is not None
+                    or self.turn is None or self.turn.active_player is not PlayerRole.RUNNER
+                    or self.turn.phase is not TurnPhase.ACTION):
+                raise ValueError("A run requires the Runner action phase without another priority window")
+            if self.run.server_id not in self.servers:
+                raise ValueError("The attacked server must exist during a run")
+            if (self.run.phase == "access") != (self.run.current_card_id is not None):
+                raise ValueError("Only an access phase has a current card")
+            if self.run.current_card_id is not None and self.run.current_card_id not in self.run.visible_card_ids:
+                raise ValueError("The current access must be visible to the Runner")
+            if any(i not in self.card_instances for i in self.run.visible_card_ids + self.run.accessed_card_ids):
+                raise ValueError("Run access records must reference physical cards")
+
         if len(self.servers) != len(set(self.servers)):
             raise ValueError("Server IDs must be unique")
         present_central_servers = {
@@ -359,5 +392,5 @@ class PendingDecision(DomainModel):
     """Public decision context, excluding private cards and executable choices."""
 
     player: PlayerRole
-    type: Literal["choose_opening_hand", "choose_action", "discard_to_hand_limit", "paid_ability_window", "resolve_reaction"]
+    type: Literal["choose_opening_hand", "choose_action", "discard_to_hand_limit", "paid_ability_window", "resolve_reaction", "continue_run", "choose_access", "resolve_access"]
     cards_to_discard: int | None = None

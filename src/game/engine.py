@@ -12,19 +12,24 @@ from content.cards.models import CardDefinition
 from .card_movement import draw_from_deck
 from .card_play import play_card, validate_card_play
 from .commands import (
+    AccessCard,
     AdvanceCard,
     ChooseMulligan,
+    ContinueRun,
     DiscardCards,
     DiscardSelection,
     DrawCard,
+    FinishAccess,
     GainCredit,
     GameCommand,
     InstallCard,
+    JackOut,
     PassPriority,
     PlayCard,
     PurgeVirusCounters,
     RemoveTag,
     ResolveReaction,
+    RunServer,
     ScoreAgenda,
 )
 from .effects import resolve_effect
@@ -46,6 +51,7 @@ from .models import (
     TurnPhase,
     ZoneLocation,
 )
+from .runs import resolve_run_command, run_actions, unprotected_servers
 from .setup import IllegalCommand, choose_mulligan
 from .turns import advance_turn, hand_cards, maximum_hand_size
 
@@ -73,6 +79,8 @@ def legal_actions_for(
         )
 
     definitions = card_definitions or {}
+    if state.run is not None:
+        return run_actions(state, definitions) if player.role is PlayerRole.RUNNER else ()
     if state.window is not None:
         if state.window.player is not player.role:
             return ()
@@ -106,6 +114,7 @@ def legal_actions_for(
 
     actions: list[GameCommand] = [GainCredit(), DrawCard()]
     if player.role is PlayerRole.RUNNER:
+        actions.extend(RunServer(server) for server in unprotected_servers(state))
         if player.tags > 0 and player.credits >= 2:
             actions.append(RemoveTag())
     elif player.clicks_remaining >= 3:
@@ -158,6 +167,21 @@ def apply_command(
     player = _player_for_id(state, player_id)
     if player is None:
         raise IllegalCommand("Player is not part of this game")
+    run_commands = (RunServer, ContinueRun, JackOut, AccessCard, FinishAccess)
+    if state.run is not None or isinstance(command, run_commands):
+        if state.winner is not None or player.role is not PlayerRole.RUNNER:
+            raise IllegalCommand("Only the Runner can make run decisions")
+        if isinstance(command, RunServer):
+            if state.run is not None:
+                raise IllegalCommand("Finish the current run first")
+            _validate_action_window(state, player)
+        elif state.run is None or not isinstance(command, run_commands):
+            raise IllegalCommand("Finish the current run before taking another action")
+        result = state.model_copy(deep=True)
+        resolve_run_command(result, command, card_definitions or {})
+        result.turn.step = "before_action"
+        advance_turn(result)
+        return GameState.model_validate(result.model_dump())
     if isinstance(command, (PassPriority, ScoreAgenda, ResolveReaction)):
         if state.winner is not None or state.window is None or state.window.player is not player.role:
             raise IllegalCommand("You do not have priority in a window")
@@ -312,6 +336,9 @@ def pending_decision(state: GameState) -> PendingDecision | None:
         return None
     if state.setup.pending_player is not None:
         return PendingDecision(player=state.setup.pending_player, type="choose_opening_hand")
+    if state.run is not None:
+        kind = {"movement": "continue_run", "breach": "choose_access", "access": "resolve_access"}[state.run.phase]
+        return PendingDecision(player=PlayerRole.RUNNER, type=kind)
     if state.window is not None:
         return PendingDecision(player=state.window.player, type=("paid_ability_window" if state.window.kind == "paid" else "resolve_reaction"))
     if state.turn is None:

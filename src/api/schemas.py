@@ -18,19 +18,24 @@ from content.cards.models import CardDefinition, CardSide, CardType
 from content.decks.models import PreconstructedDeck
 from content.opponents.models import OpponentProfile
 from game.commands import (
+    AccessCard,
     AdvanceCard,
     ChooseMulligan,
+    ContinueRun,
     DiscardCards,
     DiscardSelection,
     DrawCard,
+    FinishAccess,
     GainCredit,
     GameCommand,
     InstallCard,
+    JackOut,
     PassPriority,
     PlayCard,
     PurgeVirusCounters,
     RemoveTag,
     ResolveReaction,
+    RunServer,
     ScoreAgenda,
 )
 from game.engine import legal_actions_for, pending_decision
@@ -112,7 +117,7 @@ class DecisionView(ApiModel):
     """Public context shared by both players, never hidden card choices."""
 
     player: PlayerRole
-    type: Literal["choose_opening_hand", "choose_action", "discard_to_hand_limit", "paid_ability_window", "resolve_reaction"]
+    type: Literal["choose_opening_hand", "choose_action", "discard_to_hand_limit", "paid_ability_window", "resolve_reaction", "continue_run", "choose_access", "resolve_access"]
     cards_to_discard: int | None = None
 
 
@@ -148,8 +153,36 @@ class ResolveReactionCommandRequest(ApiModel):
     card_instance_id: UUID
 
 
+class RunServerCommandRequest(ApiModel):
+    type: Literal["run_server"]
+    server_id: ServerId
+
+
+class ContinueRunCommandRequest(ApiModel):
+    type: Literal["continue_run"]
+
+
+class JackOutCommandRequest(ApiModel):
+    type: Literal["jack_out"]
+
+
+class AccessCardCommandRequest(ApiModel):
+    type: Literal["access_card"]
+    target: UUID | Literal["hq", "rd"]
+
+
+class FinishAccessCommandRequest(ApiModel):
+    type: Literal["finish_access"]
+    trash: bool = False
+
+
 PlayerCommandRequest = Annotated[
-    MulliganCommandRequest
+    RunServerCommandRequest
+    | ContinueRunCommandRequest
+    | JackOutCommandRequest
+    | AccessCardCommandRequest
+    | FinishAccessCommandRequest
+    | MulliganCommandRequest
     | GainCreditCommandRequest
     | DrawCardCommandRequest
     | RemoveTagCommandRequest
@@ -170,6 +203,16 @@ LegalAction = PlayerCommandRequest | DiscardCardsAction
 
 def game_command_from_request(request: PlayerCommandRequest) -> GameCommand:
     """Translate a validated API command into the transport-independent game type."""
+    if isinstance(request, RunServerCommandRequest):
+        return RunServer(request.server_id)
+    if isinstance(request, ContinueRunCommandRequest):
+        return ContinueRun()
+    if isinstance(request, JackOutCommandRequest):
+        return JackOut()
+    if isinstance(request, AccessCardCommandRequest):
+        return AccessCard(request.target)
+    if isinstance(request, FinishAccessCommandRequest):
+        return FinishAccess(request.trash)
     if isinstance(request, PlayCardCommandRequest):
         return PlayCard(request.card_instance_id)
     if isinstance(request, InstallCardCommandRequest):
@@ -199,6 +242,16 @@ def game_command_from_request(request: PlayerCommandRequest) -> GameCommand:
 
 def command_request_from_game(command: GameCommand | DiscardSelection) -> LegalAction:
     """Project a domain command into the shape clients can submit and display."""
+    if isinstance(command, RunServer):
+        return RunServerCommandRequest(type="run_server", server_id=command.server_id)
+    if isinstance(command, ContinueRun):
+        return ContinueRunCommandRequest(type="continue_run")
+    if isinstance(command, JackOut):
+        return JackOutCommandRequest(type="jack_out")
+    if isinstance(command, AccessCard):
+        return AccessCardCommandRequest(type="access_card", target=command.target)
+    if isinstance(command, FinishAccess):
+        return FinishAccessCommandRequest(type="finish_access", trash=command.trash)
     if isinstance(command, PlayCard):
         return PlayCardCommandRequest(type="play_card", card_instance_id=command.card_instance_id)
     if isinstance(command, InstallCard):
@@ -285,6 +338,18 @@ class OpponentView(PlayerSummary):
     hand_count: int
 
 
+class RunView(ApiModel):
+    """Public run progress and viewer-specific temporary access information."""
+
+    server_id: ServerId
+    phase: str
+    successful: bool
+    bad_publicity_credits: int
+    current_card: CardView | None
+    accessed_cards: list[CardView]
+    access_note: str = "Card-specific access abilities are not implemented yet."
+
+
 class InitialGameView(ApiModel):
     """Current state projection with private cards and legal actions for one viewer."""
 
@@ -302,6 +367,7 @@ class InitialGameView(ApiModel):
     opponent: OpponentView
     servers: list[str | int]
     installed_cards: list[InstalledCardView]
+    run: RunView | None = None
 
     @classmethod
     def from_game_state(
@@ -367,8 +433,21 @@ class InitialGameView(ApiModel):
             and card.location.player_id == opponent.player_id
             for card in state.card_instances.values()
         )
+        visible_ids = set()
+        if state.run is not None:
+            visible_ids = {i for i in state.run.visible_card_ids
+                           if you.role is PlayerRole.RUNNER
+                           or state.card_instances[i].location.zone is not CardZone.DECK}
         decision = pending_decision(state)
         return cls(
+            run=RunView(
+                server_id=state.run.server_id, phase=state.run.phase,
+                successful=state.run.successful,
+                bad_publicity_credits=state.run.bad_publicity_credits,
+                current_card=card_view(state.run.current_card_id)
+                    if state.run.current_card_id in visible_ids else None,
+                accessed_cards=[card_view(i) for i in dict.fromkeys(state.run.visible_card_ids) if i in visible_ids],
+            ) if state.run else None,
             game_id=state.game_id,
             viewer_player_id=viewer_player_id,
             viewer_role=you.role,
@@ -393,7 +472,7 @@ class InitialGameView(ApiModel):
                 instance_id=c.instance_id, server_id=c.location.server.server_id,
                 area=c.location.server.area.value, ice_distance_from_server=c.location.server.ice_distance_from_server,
                 face_up=bool(c.face_up), counters=c.counters,
-                card=card_view(c.instance_id) if c.face_up or c.controller_id == viewer_player_id else None)
+                card=card_view(c.instance_id) if c.face_up or c.controller_id == viewer_player_id or c.instance_id in visible_ids else None)
                 for c in state.card_instances.values() if c.installed and c.location.server],
             servers=[
                 server.value if hasattr(server, "value") else server

@@ -115,6 +115,41 @@ class GameScreen:
                         choices.append(
                             MenuChoice("Mulligan · shuffle and draw five", "opening_hand", decision)
                         )
+                elif action_type in {"run_server", "continue_run", "jack_out", "access_card", "finish_access"} and self.submit_action is not None:
+                    run = self.state.get("run") or {}
+                    if action_type == "run_server":
+                        label = f"Run {self._server_label(action['server_id'])} · 1 click"
+                    elif action_type == "continue_run":
+                        label = "Continue to server"
+                    elif action_type == "jack_out":
+                        label = "Jack out"
+                    elif action_type == "access_card":
+                        target = action["target"]
+                        known = run.get("accessed_cards", []) + self.opponent.get("discard_pile", [])
+                        known += [c["card"] for c in self.state.get("installed_cards", []) if c.get("card")]
+                        card = next((c for c in known if c["instance_id"] == target), None)
+                        if target == "hq":
+                            label = "Access a random card from HQ"
+                        elif target == "rd":
+                            label = "Access the top card of R&D"
+                        else:
+                            roots = [c for c in self.state.get("installed_cards", []) if c["instance_id"] == target]
+                            position = self._server_label(roots[0]["server_id"]) if roots else "Archives"
+                            root_cards = [c for c in self.state.get("installed_cards", [])
+                                          if roots and c["server_id"] == roots[0]["server_id"] and c["area"] == "root"]
+                            ordinal = next((i for i, c in enumerate(root_cards, 1) if c["instance_id"] == target), 1)
+                            title = card['title'] if card else f"facedown card {ordinal}"
+                            label = f"Access {title} in {position}"
+                    else:
+                        card = run.get("current_card") or {}
+                        if action.get("trash"):
+                            cost = self.card_catalog.get(card.get("definition_id"), {}).get("trash_cost", "?")
+                            label = f"Trash {card.get('title', 'card')} · {cost} credits"
+                        elif card.get("card_type") == "agenda":
+                            label = f"Steal {card['title']}"
+                        else:
+                            label = "Leave card and finish access"
+                    choices.append(MenuChoice(label, "action", dict(action)))
                 elif action_type == "play_card" and self.submit_action is not None:
                     card = next((c for c in self.hand if c["instance_id"] == action["card_instance_id"]), None)
                     if card is not None:
@@ -294,6 +329,17 @@ class GameScreen:
         def line(text: str = "", style: str = "") -> None:
             fragments.append((style, f"{text}\n"))
 
+        run = self.state.get("run")
+        if run:
+            line(f"Run on {self._server_label(run['server_id'])} · {run['phase']}", "class:section")
+            line(f"Run credits: {run.get('bad_publicity_credits', 0)}")
+            card = run.get("current_card")
+            if card:
+                line(f"Accessing {card['title']}", "class:card-title")
+                definition = self.card_catalog.get(card["definition_id"], {})
+                line(self._plain_text(definition.get("printed_text", "")))
+                line(run.get("access_note", ""), "class:muted")
+            line()
         corp, runner = self._players_by_role()
         corp_hand = self._hand_count_for_role(corp)
         runner_hand = self._hand_count_for_role(runner)
