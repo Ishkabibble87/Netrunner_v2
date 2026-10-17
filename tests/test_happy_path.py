@@ -16,17 +16,21 @@ from content.cards.loader import load_nsg_card_definitions
 from content.decks.deck_importer import load_nrdb_deck
 from content.opponents.loader import load_opponent_profiles
 from game.commands import (
+    AccessCard,
     AdvanceCard,
     ChooseMulligan,
+    ContinueRun,
     DiscardCards,
     DiscardSelection,
     DrawCard,
+    FinishAccess,
     GainCredit,
     InstallCard,
     PassPriority,
     PlayCard,
     PurgeVirusCounters,
     ResolveReaction,
+    RunServer,
     ScoreAgenda,
 )
 from game.engine import legal_actions_for
@@ -60,6 +64,7 @@ class GameProgressTests(unittest.TestCase):
         self.discard_and_continue_after_opponent_turn(session)
         self.play_economy_cards_and_continue(session)
         self.install_advance_and_score(session)
+        self.contest_another_office(session)
 
     def select_and_parse_deck(self) -> DeckSelection:
         deck = load_nrdb_deck(
@@ -211,8 +216,9 @@ class GameProgressTests(unittest.TestCase):
         selection, = legal_actions_for(state, state.corp.player_id)
         self.assertIsInstance(selection, DiscardSelection)
         self.assertEqual(selection.required_count, 2)
-        chosen = tuple(i for i in selection.eligible_card_instance_ids
-                       if state.card_instances[i].definition_id not in {"30075", "30064"})[:2]
+        chosen = tuple(next(i for i in selection.eligible_card_instance_ids
+                            if self.cards[state.card_instances[i].definition_id].title == title)
+                       for title in ("Offworld Office", "Hedge Fund"))
         session, _ = self.sessions.submit(state.game_id, token, DiscardCards(chosen))
         state = session.state
         self.assertEqual(state.turn.active_player, PlayerRole.CORP)
@@ -311,6 +317,51 @@ class GameProgressTests(unittest.TestCase):
         self.assertEqual(resolved.turn.number, 7)
         submit(PassPriority())
         self.assertEqual(session.state.turn.number, 9)
+
+    def contest_another_office(self, session):
+        """Continue the same game with both seats controlled to contest a remote."""
+        session.ai_player_ids.clear()
+        session.player_tokens[session.state.runner.player_id] = "scenario-runner"
+
+        def submit(role, command):
+            player = session.state.corp if role is PlayerRole.CORP else session.state.runner
+            self.sessions.submit(session.state.game_id, session.player_tokens[player.player_id],
+                                 command, card_definitions=self.cards)
+            return session.state
+
+        corp, runner = PlayerRole.CORP, PlayerRole.RUNNER
+        office = next(c for c in self.cards_in_zone(session.state, session.state.corp.player_id,
+                                                   CardZone.HAND).values()
+                      if self.cards[c.definition_id].title == "Offworld Office")
+        while session.state.window:
+            submit(corp, PassPriority())
+        submit(corp, InstallCard(office.instance_id, "new_remote"))
+        for _ in range(2):
+            submit(corp, PassPriority())
+            submit(corp, AdvanceCard(office.instance_id))
+        submit(corp, PassPriority())
+        self.assertEqual(session.state.turn.active_player, runner)
+        for _ in range(3):
+            submit(runner, GainCredit())
+        credits = session.state.corp.credits
+        submit(runner, RunServer(1))
+        self.assertEqual(session.state.runner.clicks_remaining, 0)
+        self.assertEqual(session.state.turn.active_player, runner)
+        submit(runner, ContinueRun())
+        submit(runner, AccessCard(office.instance_id))
+        self.assertTrue(session.state.run.successful)
+        self.assertEqual(session.state.run.current_card_id, office.instance_id)
+        stolen = submit(runner, FinishAccess())
+        card = stolen.card_instances[office.instance_id]
+        self.assertEqual(card.location.zone, CardZone.SCORE_AREA)
+        self.assertEqual(card.location.player_id, stolen.runner.player_id)
+        self.assertEqual(card.counters, {})
+        self.assertEqual(stolen.corp.credits, credits)
+        self.assertNotIn(1, stolen.servers)
+        self.assertIsNone(stolen.run)
+        self.assertEqual(stolen.turn.active_player, corp)
+        self.assertEqual(len(self.cards_in_zone(stolen, stolen.corp.player_id, CardZone.SCORE_AREA)), 1)
+        self.assertEqual(len(self.cards_in_zone(stolen, stolen.runner.player_id, CardZone.SCORE_AREA)), 1)
 
     @staticmethod
     def cards_in_zone(state, player_id, zone):

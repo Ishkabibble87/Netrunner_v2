@@ -93,4 +93,35 @@ class ResolveReaction:
     card_instance_id: UUID
 
 
-GameCommand = InstallCard | AdvanceCard | ScoreAgenda | PassPriority | ResolveReaction | ChooseMulligan | GainCredit | DrawCard | RemoveTag | PurgeVirusCounters | DiscardCards | PlayCard
+@dataclass(frozen=True)
+class RunServer:
+    """Spend one Runner click to initiate a run on an unprotected server."""
+
+    server_id: ServerId
+
+
+@dataclass(frozen=True)
+class ContinueRun:
+    """Decline to jack out and proceed to success and breach."""
+
+
+@dataclass(frozen=True)
+class JackOut:
+    """End a run at its movement opportunity, before success."""
+
+
+@dataclass(frozen=True)
+class AccessCard:
+    """Choose a root/discard card or an anonymous central-zone access."""
+
+    target: UUID | Literal["hq", "rd"]
+
+
+@dataclass(frozen=True)
+class FinishAccess:
+    """Resolve basic trashing, mandatory agenda stealing, and finish access."""
+
+    trash: bool = False
+
+
+GameCommand = RunServer | ContinueRun | JackOut | AccessCard | FinishAccess | InstallCard | AdvanceCard | ScoreAgenda | PassPriority | ResolveReaction | ChooseMulligan | GainCredit | DrawCard | RemoveTag | PurgeVirusCounters | DiscardCards | PlayCard
