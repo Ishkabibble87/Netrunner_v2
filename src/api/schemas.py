@@ -19,13 +19,15 @@ from content.decks.models import PreconstructedDeck
 from content.opponents.models import OpponentProfile
 from game.commands import (
     ChooseMulligan,
+    DiscardCards,
+    DiscardSelection,
     DrawCard,
     GainCredit,
     GameCommand,
     PurgeVirusCounters,
     RemoveTag,
 )
-from game.engine import legal_actions_for
+from game.engine import legal_actions_for, pending_decision
 from game.models import (
     CardZone,
     DeckSelection,
@@ -34,6 +36,7 @@ from game.models import (
     PlayerRole,
     PlayerState,
 )
+from game.turns import maximum_hand_size
 
 
 class ApiModel(BaseModel):
@@ -75,6 +78,29 @@ class RemoveTagCommandRequest(ApiModel):
     type: Literal["remove_tag"]
 
 
+class DiscardCardsCommandRequest(ApiModel):
+    """Submit the complete set of excess cards; the engine checks eligibility."""
+
+    type: Literal["discard_cards"]
+    card_instance_ids: list[UUID] = Field(min_length=1)
+
+
+class DiscardCardsAction(ApiModel):
+    """A private selection action, avoiding combinatorial command enumeration."""
+
+    type: Literal["discard_cards"] = "discard_cards"
+    eligible_card_instance_ids: list[UUID]
+    required_count: int = Field(gt=0)
+
+
+class DecisionView(ApiModel):
+    """Public context shared by both players, never hidden card choices."""
+
+    player: PlayerRole
+    type: Literal["choose_opening_hand", "choose_action", "discard_to_hand_limit"]
+    cards_to_discard: int | None = None
+
+
 class PurgeVirusCountersCommandRequest(ApiModel):
     """Request the Corp's three-click virus-counter purge action."""
 
@@ -86,13 +112,19 @@ PlayerCommandRequest = Annotated[
     | GainCreditCommandRequest
     | DrawCardCommandRequest
     | RemoveTagCommandRequest
-    | PurgeVirusCountersCommandRequest,
+    | PurgeVirusCountersCommandRequest
+    | DiscardCardsCommandRequest,
     Field(discriminator="type"),
 ]
 
 
+LegalAction = PlayerCommandRequest | DiscardCardsAction
+
+
 def game_command_from_request(request: PlayerCommandRequest) -> GameCommand:
     """Translate a validated API command into the transport-independent game type."""
+    if isinstance(request, DiscardCardsCommandRequest):
+        return DiscardCards(tuple(request.card_instance_ids))
     if isinstance(request, MulliganCommandRequest):
         return ChooseMulligan(request.decision)
     if isinstance(request, GainCreditCommandRequest):
@@ -106,8 +138,13 @@ def game_command_from_request(request: PlayerCommandRequest) -> GameCommand:
     raise ValueError("Unsupported API command")
 
 
-def command_request_from_game(command: GameCommand) -> PlayerCommandRequest:
+def command_request_from_game(command: GameCommand | DiscardSelection) -> LegalAction:
     """Project a domain command into the shape clients can submit and display."""
+    if isinstance(command, DiscardSelection):
+        return DiscardCardsAction(eligible_card_instance_ids=list(command.eligible_card_instance_ids),
+                                 required_count=command.required_count)
+    if isinstance(command, DiscardCards):
+        return DiscardCardsCommandRequest(type="discard_cards", card_instance_ids=list(command.card_instance_ids))
     if isinstance(command, ChooseMulligan):
         return MulliganCommandRequest(type="choose_mulligan", decision=command.decision)
     if isinstance(command, GainCredit):
@@ -149,6 +186,9 @@ class PlayerSummary(ApiModel):
     tags: int
     identity: CardView
     deck_count: int
+    maximum_hand_size: int
+    discard_count: int
+    discard_pile: list[CardView]
 
 
 class OwnPlayerView(PlayerSummary):
@@ -168,7 +208,8 @@ class InitialGameView(ApiModel):
     setup: SetupView
     turn: TurnView | None
     winner: PlayerRole | None
-    legal_actions: list[PlayerCommandRequest] = Field(
+    decision: DecisionView | None
+    legal_actions: list[LegalAction] = Field(
         description="Commands currently available to this viewer; submission is validated again",
     )
     you: OwnPlayerView
@@ -209,6 +250,14 @@ class InitialGameView(ApiModel):
                 credits=player.credits,
                 clicks_remaining=player.clicks_remaining,
                 tags=player.tags,
+                maximum_hand_size=maximum_hand_size(player),
+                discard_count=sum(card.location.zone is CardZone.DISCARD_PILE
+                                  and card.location.player_id == player.player_id
+                                  for card in state.card_instances.values()),
+                discard_pile=[card_view(card.instance_id) for card in state.card_instances.values()
+                              if card.location.zone is CardZone.DISCARD_PILE
+                              and card.location.player_id == player.player_id
+                              and (card.face_up or player.player_id == viewer_player_id)],
                 identity=identity,
                 deck_count=sum(
                     card.location.zone is CardZone.DECK
@@ -228,6 +277,7 @@ class InitialGameView(ApiModel):
             and card.location.player_id == opponent.player_id
             for card in state.card_instances.values()
         )
+        decision = pending_decision(state)
         return cls(
             game_id=state.game_id,
             viewer_player_id=viewer_player_id,
@@ -239,6 +289,7 @@ class InitialGameView(ApiModel):
                 phase=state.turn.phase.value,
             ) if state.turn is not None else None,
             winner=state.winner,
+            decision=DecisionView(**decision.model_dump()) if decision else None,
             legal_actions=[
                 command_request_from_game(command)
                 for command in legal_actions_for(state, viewer_player_id)

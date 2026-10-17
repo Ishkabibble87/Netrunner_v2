@@ -7,8 +7,14 @@ from threading import Lock
 from time import monotonic
 from uuid import UUID, uuid4
 
-from game.commands import ChooseMulligan, GameCommand
-from game.engine import apply_command
+from game.commands import (
+    ChooseMulligan,
+    DiscardCards,
+    DiscardSelection,
+    GainCredit,
+    GameCommand,
+)
+from game.engine import apply_command, legal_actions_for
 from game.models import GameState, MulliganDecision, PlayerRole
 
 
@@ -23,6 +29,27 @@ def advance_ai_setup(state: GameState, ai_player_ids: set[UUID]) -> GameState:
         if player.player_id not in ai_player_ids:
             break
         state = apply_command(state, player.player_id, ChooseMulligan(MulliganDecision.KEEP))
+    return state
+
+
+def advance_ai_decisions(state: GameState, ai_player_ids: set[UUID]) -> GameState:
+    """Run the training policy until a human decision or game end.
+
+    The opponent keeps its opening hand, gains credits, and discards the first
+    eligible excess cards. Every choice goes through the authoritative engine.
+    """
+    state = advance_ai_setup(state, ai_player_ids)
+    while state.winner is None and state.turn is not None:
+        player = state.corp if state.turn.active_player is PlayerRole.CORP else state.runner
+        if player.player_id not in ai_player_ids:
+            break
+        actions = legal_actions_for(state, player.player_id)
+        if not actions:
+            break
+        selection = next((a for a in actions if isinstance(a, DiscardSelection)), None)
+        command = (DiscardCards(selection.eligible_card_instance_ids[:selection.required_count])
+                   if selection else GainCredit())
+        state = apply_command(state, player.player_id, command)
     return state
 
 
@@ -106,9 +133,9 @@ class SessionStore:
             if state.game_id in self._sessions:
                 raise ValueError("A session already exists for this game")
             ai_player_ids = {state.corp.player_id, state.runner.player_id} - humans
-            # Move past AI mulligan prompts so the client only sees choices for humans.
+            # Resolve scripted choices until the session needs a human decision.
             session = GameSession(
-                state=advance_ai_setup(state, ai_player_ids),
+                state=advance_ai_decisions(state, ai_player_ids),
                 opponent_profile_id=opponent_profile_id,
                 player_tokens={player_id: token_urlsafe(32) for player_id in humans},
                 expires_at=self._clock() + self.connect_timeout_seconds,
@@ -143,7 +170,7 @@ class SessionStore:
     def submit(
         self, game_id: UUID, token: str, command: GameCommand,
     ) -> tuple[GameSession, UUID]:
-        """Apply an authenticated command and advance any scripted setup.
+        """Apply an authenticated command and advance scripted opponent decisions.
 
         Rule validation happens in the game layer. On success, replace the
         immutable state snapshot and increment its revision under the same lock,
@@ -152,7 +179,7 @@ class SessionStore:
         with self._lock:
             session, player_id = self._authenticated(game_id, token)
             state = apply_command(session.state, player_id, command)
-            session.state = advance_ai_setup(state, session.ai_player_ids)
+            session.state = advance_ai_decisions(state, session.ai_player_ids)
             session.revision += 1
             return session, player_id
 

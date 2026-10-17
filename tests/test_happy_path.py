@@ -14,7 +14,14 @@ from application.sessions import GameSession, SessionStore
 from content.cards.loader import load_nsg_card_definitions
 from content.decks.deck_importer import load_nrdb_deck
 from content.opponents.loader import load_opponent_profiles
-from game.commands import ChooseMulligan, DrawCard, GainCredit, PurgeVirusCounters
+from game.commands import (
+    ChooseMulligan,
+    DiscardCards,
+    DiscardSelection,
+    DrawCard,
+    GainCredit,
+    PurgeVirusCounters,
+)
 from game.engine import legal_actions_for
 from game.models import (
     CardZone,
@@ -43,6 +50,7 @@ class GameProgressTests(unittest.TestCase):
         state = self.mulligan_while_opponent_keeps(session)
         self.assert_corp_first_turn_started(state)
         self.take_basic_actions(session)
+        self.discard_and_continue_after_opponent_turn(session)
 
     def select_and_parse_deck(self) -> DeckSelection:
         deck = load_nrdb_deck(
@@ -167,6 +175,29 @@ class GameProgressTests(unittest.TestCase):
                          self.cards_in_zone(drawn, player_id, CardZone.DECK))
         self.assertEqual(gained.runner, before.runner)
         self.assertEqual(gained.turn, before.turn)
+
+    def discard_and_continue_after_opponent_turn(self, session: GameSession) -> None:
+        """Finish the Corp turn, discard together, and let the training AI act."""
+        state = session.state
+        token = session.player_tokens[state.corp.player_id]
+        session, _ = self.sessions.submit(state.game_id, token, GainCredit())
+        state = session.state
+        self.assertEqual(state.turn.phase, TurnPhase.DISCARD)
+        selection, = legal_actions_for(state, state.corp.player_id)
+        self.assertIsInstance(selection, DiscardSelection)
+        self.assertEqual(selection.required_count, 2)
+        chosen = selection.eligible_card_instance_ids[:2]
+        session, _ = self.sessions.submit(state.game_id, token, DiscardCards(chosen))
+        state = session.state
+        self.assertEqual(state.turn.active_player, PlayerRole.CORP)
+        self.assertEqual(state.turn.number, 3)
+        self.assertEqual(state.corp.clicks_remaining, 3)
+        self.assertEqual(state.runner.credits, 9)
+        self.assertEqual(state.runner.clicks_remaining, 0)
+        self.assertEqual(len(self.cards_in_zone(state, state.corp.player_id, CardZone.HAND)), 6)
+        for instance_id in chosen:
+            self.assertEqual(state.card_instances[instance_id].location.zone, CardZone.DISCARD_PILE)
+            self.assertFalse(state.card_instances[instance_id].face_up)
 
     @staticmethod
     def cards_in_zone(state, player_id, zone):
