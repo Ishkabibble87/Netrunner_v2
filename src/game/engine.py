@@ -10,16 +10,22 @@ from .card_movement import draw_from_deck
 from .commands import (
     ChooseMulligan,
     DrawCard,
+    DiscardCards,
+    DiscardSelection,
     GameCommand,
     GainCredit,
     PurgeVirusCounters,
     RemoveTag,
 )
-from .models import GameState, MulliganDecision, PlayerRole, PlayerState, TurnPhase
+from .models import (
+    CardZone, GameState, MulliganDecision, PendingDecision, PlayerRole,
+    PlayerState, TurnPhase, ZoneLocation,
+)
 from .setup import IllegalCommand, choose_mulligan
+from .turns import advance_turn, hand_cards, maximum_hand_size
 
 
-def legal_actions_for(state: GameState, player_id: UUID) -> tuple[GameCommand, ...]:
+def legal_actions_for(state: GameState, player_id: UUID) -> tuple[GameCommand | DiscardSelection, ...]:
     """Return commands currently available to one player, in menu order.
 
     This is a player-specific projection of the current state. It is not a
@@ -37,6 +43,14 @@ def legal_actions_for(state: GameState, player_id: UUID) -> tuple[GameCommand, .
             ChooseMulligan(MulliganDecision.KEEP),
             ChooseMulligan(MulliganDecision.MULLIGAN),
         )
+
+    if (state.turn is not None and state.turn.phase is TurnPhase.DISCARD
+            and state.turn.active_player is player.role):
+        cards = hand_cards(state, player)
+        count = len(cards) - maximum_hand_size(player)
+        if count > 0:
+            return (DiscardSelection(tuple(card.instance_id for card in cards), count),)
+        return ()
 
     if (
         state.turn is None
@@ -63,6 +77,24 @@ def apply_command(state: GameState, player_id: UUID, command: GameCommand) -> Ga
     player = _player_for_id(state, player_id)
     if player is None:
         raise IllegalCommand("Player is not part of this game")
+    if isinstance(command, DiscardCards):
+        if (state.winner is not None or state.setup.pending_player is not None
+                or state.turn is None or state.turn.phase is not TurnPhase.DISCARD
+                or state.turn.active_player is not player.role):
+            raise IllegalCommand("Discard only during your discard decision")
+        eligible = {card.instance_id for card in hand_cards(state, player)}
+        required = len(eligible) - maximum_hand_size(player)
+        selected = command.card_instance_ids
+        if (required <= 0 or len(selected) != required
+                or len(set(selected)) != required or not set(selected) <= eligible):
+            raise IllegalCommand(f"Choose exactly {required} distinct cards from your hand")
+        result = state.model_copy(deep=True)
+        for instance_id in selected:
+            card = result.card_instances[instance_id]
+            card.face_up = player.role is PlayerRole.RUNNER
+            card.location = ZoneLocation(zone=CardZone.DISCARD_PILE, player_id=player_id)
+        advance_turn(result)
+        return GameState.model_validate(result.model_dump())
     _validate_action_window(state, player)
 
     if isinstance(command, GainCredit):
@@ -101,6 +133,7 @@ def apply_command(state: GameState, player_id: UUID, command: GameCommand) -> Ga
     else:
         raise IllegalCommand("Unsupported command")
 
+    advance_turn(result)
     return GameState.model_validate(result.model_dump())
 
 
@@ -129,3 +162,18 @@ def _player_for_id(state: GameState, player_id: UUID) -> PlayerState | None:
 def _player_for_role(state: GameState, role: PlayerRole) -> PlayerState:
     """Return the player state for a role."""
     return state.corp if role is PlayerRole.CORP else state.runner
+
+
+def pending_decision(state: GameState) -> PendingDecision | None:
+    """Describe the public decision independently of either player's view."""
+    if state.winner is not None:
+        return None
+    if state.setup.pending_player is not None:
+        return PendingDecision(player=state.setup.pending_player, type="choose_opening_hand")
+    if state.turn is None:
+        return None
+    player = _player_for_role(state, state.turn.active_player)
+    if state.turn.phase is TurnPhase.DISCARD:
+        return PendingDecision(player=player.role, type="discard_to_hand_limit",
+                               cards_to_discard=len(hand_cards(state, player)) - maximum_hand_size(player))
+    return PendingDecision(player=player.role, type="choose_action")

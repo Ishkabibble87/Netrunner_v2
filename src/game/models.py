@@ -5,7 +5,7 @@ module starts with the state needed once both players have joined.
 """
 
 from enum import StrEnum
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -339,3 +339,11 @@ class GameState(DomainModel):
         if remote_positions != list(range(1, len(remote_positions) + 1)):
             raise ValueError("Remote server positions must be contiguous starting at 1")
         return self
+
+
+class PendingDecision(DomainModel):
+    """Public decision context, excluding private cards and executable choices."""
+
+    player: PlayerRole
+    type: Literal["choose_opening_hand", "choose_action", "discard_to_hand_limit"]
+    cards_to_discard: int | None = None

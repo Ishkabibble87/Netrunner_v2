@@ -5,6 +5,7 @@ client. The engine derives the acting player from the authenticated session.
 """
 
 from dataclasses import dataclass
+from uuid import UUID
 
 from .models import MulliganDecision
 
@@ -34,4 +35,19 @@ class PurgeVirusCounters:
     """Spend three Corp clicks to remove every virus counter in play."""
 
 
-GameCommand = ChooseMulligan | GainCredit | DrawCard | RemoveTag | PurgeVirusCounters
+@dataclass(frozen=True)
+class DiscardCards:
+    """Choose all excess cards to discard simultaneously."""
+
+    card_instance_ids: tuple[UUID, ...]
+
+
+@dataclass(frozen=True)
+class DiscardSelection:
+    """Describe a legal selection without enumerating every card combination."""
+
+    eligible_card_instance_ids: tuple[UUID, ...]
+    required_count: int
+
+
+GameCommand = ChooseMulligan | GainCredit | DrawCard | RemoveTag | PurgeVirusCounters | DiscardCards

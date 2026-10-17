@@ -115,6 +115,8 @@ class GameScreen:
                         choices.append(
                             MenuChoice("Mulligan · shuffle and draw five", "opening_hand", decision)
                         )
+                elif action_type == "discard_cards" and self.submit_action is not None:
+                    choices.append(MenuChoice(f"Discard {action['required_count']} cards", "discard", action))
                 elif self.submit_action is not None:
                     label = {
                         "gain_credit": "Gain 1 credit",
@@ -345,6 +347,10 @@ class GameScreen:
             action_prompt = "Review your hand, then keep it or take one mulligan."
         elif pending_player is not None:
             action_prompt = f"Waiting for {str(pending_player).title()} to choose an opening hand."
+        elif (self.state.get("decision") or {}).get("type") == "discard_to_hand_limit":
+            action_prompt = self._status_text()
+        elif (self.state.get("decision") or {}).get("player") not in (None, self.viewer_role):
+            action_prompt = f"Waiting for {self.state['decision']['player'].title()} to choose an action."
         elif self.state.get("legal_actions"):
             action_prompt = "Choose an available action, or inspect the board."
         else:
@@ -455,6 +461,10 @@ class GameScreen:
             if pending == self.viewer_role:
                 return "Choose your opening hand · one mulligan allowed"
             return f"Waiting for {str(pending).title()} opening-hand choice"
+        decision = self.state.get("decision") or {}
+        if decision.get("type") == "discard_to_hand_limit":
+            who = "You" if decision["player"] == self.viewer_role else str(decision["player"]).title()
+            return f"{who} must discard {decision['cards_to_discard']} cards"
         turn = self.state.get("turn") or {}
         active = str(turn.get("active_player", "unknown"))
         phase = str(turn.get("phase", "unknown")).replace("_", " ")
@@ -483,6 +493,22 @@ class GameScreen:
                     card = cards[level.data["index"]]
                     labels.append(str(card.get("title", "Card")))
         return " / ".join(labels)
+
+    def _refresh_discard_choices(self) -> None:
+        """Collect a local selection and send it as one simultaneous discard."""
+        data = self.level.data
+        selected = data["selected"]
+        eligible = data["action"]["eligible_card_instance_ids"]
+        self.level.choices = [MenuChoice(
+            f"{'[x]' if card['instance_id'] in selected else '[ ]'} {card['title']}",
+            "toggle_discard", card["instance_id"],
+        ) for card in self.hand if card["instance_id"] in eligible]
+        if len(selected) == data["action"]["required_count"]:
+            self.level.choices.append(MenuChoice("Confirm discard", "action", {
+                "type": "discard_cards", "card_instance_ids": list(selected),
+            }))
+        self.level.choices.append(MenuChoice("Back", "back"))
+        self._invalidate()
 
     def _move(self, direction: int) -> None:
         self._reset_menu_scroll()
@@ -528,6 +554,18 @@ class GameScreen:
                 self.command_error = None
                 self.update_state(state)
             self._invalidate()
+        elif choice.kind == "discard":
+            self._push(MenuLevel("Choose cards to discard", "discard", data={
+                "action": choice.value, "selected": [],
+            }))
+            self._refresh_discard_choices()
+        elif choice.kind == "toggle_discard":
+            selected = self.level.data["selected"]
+            if choice.value in selected:
+                selected.remove(choice.value)
+            elif len(selected) < self.level.data["action"]["required_count"]:
+                selected.append(choice.value)
+            self._refresh_discard_choices()
         elif choice.kind == "inspect":
             corp, runner = self._players_by_role()
             corp_identity = corp.get("identity", {})
