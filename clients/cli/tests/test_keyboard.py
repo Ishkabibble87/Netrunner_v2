@@ -226,6 +226,7 @@ class GameRenderingTests(unittest.TestCase):
 class WindowsKeyboardTests(unittest.TestCase):
     def parse_records(self, records):
         from ctypes.wintypes import DWORD
+
         from anr_cli.terminal import _WindowsKeyReader
 
         reader = _WindowsKeyReader.__new__(_WindowsKeyReader)

@@ -10,8 +10,8 @@ from .card_movement import draw_from_deck
 from .commands import (
     ChooseMulligan,
     DrawCard,
-    GameCommand,
     GainCredit,
+    GameCommand,
     PurgeVirusCounters,
     RemoveTag,
 )

@@ -4,9 +4,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from content.decks.deck_importer import DeckImportError, load_nrdb_deck, parse_nrdb_deck
 from content.cards.loader import load_nsg_card_definitions
-
+from content.decks.deck_importer import DeckImportError, load_nrdb_deck, parse_nrdb_deck
 
 ROOT = Path(__file__).resolve().parents[1]
 

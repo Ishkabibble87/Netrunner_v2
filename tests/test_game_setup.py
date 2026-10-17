@@ -9,7 +9,7 @@ from uuid import uuid4
 from content.cards.loader import load_nsg_card_definitions
 from content.opponents.loader import load_opponent_profiles
 from game.commands import ChooseMulligan
-from game.models import CardZone, PlayerRole, MulliganDecision
+from game.models import CardZone, MulliganDecision, PlayerRole
 from game.setup import IllegalCommand, choose_mulligan, create_game_state
 
 

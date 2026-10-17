@@ -5,7 +5,6 @@ from collections.abc import Mapping
 from content.cards.models import CardDefinition, CardSide, CardType
 from game.models import DeckSelection, PlayerRole
 
-
 STARTER_ONLY_IDENTITY_TITLES = frozenset(
     {
         "The Catalyst: Convention Breaker",

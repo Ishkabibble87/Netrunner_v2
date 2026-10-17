@@ -23,7 +23,6 @@ from .navigation import navigation_bindings
 from .session import SessionConnection, SessionConnectionError
 from .terminal import get_terminal_input
 
-
 console = Console()
 DEFAULT_API_URL = "http://127.0.0.1:8000"
 

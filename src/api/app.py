@@ -31,13 +31,13 @@ from game.models import DeckSelection
 from game.setup import IllegalCommand
 
 from .schemas import (
-    CreateGameRequest,
     CardCatalogEntry,
+    CreateGameRequest,
     DeckImportRequest,
     GameCreatedResponse,
     InitialGameView,
-    PlayerCommandRequest,
     OpponentProfileSummary,
+    PlayerCommandRequest,
     PreconstructedDeckResponse,
     SessionSnapshot,
     game_command_from_request,

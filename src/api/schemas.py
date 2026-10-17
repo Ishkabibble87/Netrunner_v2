@@ -20,14 +20,19 @@ from content.opponents.models import OpponentProfile
 from game.commands import (
     ChooseMulligan,
     DrawCard,
-    GameCommand,
     GainCredit,
+    GameCommand,
     PurgeVirusCounters,
     RemoveTag,
 )
 from game.engine import legal_actions_for
 from game.models import (
-    CardZone, DeckSelection, GameState, MulliganDecision, PlayerRole, PlayerState,
+    CardZone,
+    DeckSelection,
+    GameState,
+    MulliganDecision,
+    PlayerRole,
+    PlayerState,
 )
 
 

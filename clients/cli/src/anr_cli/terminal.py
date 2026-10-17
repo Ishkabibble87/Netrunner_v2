@@ -5,7 +5,6 @@ import sys
 from prompt_toolkit.application.current import get_app_session
 from prompt_toolkit.input import Input
 
-
 if sys.platform == "win32":
     from collections.abc import Iterator
     from ctypes import Array
