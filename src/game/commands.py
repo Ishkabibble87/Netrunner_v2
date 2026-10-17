@@ -36,6 +36,13 @@ class PurgeVirusCounters:
 
 
 @dataclass(frozen=True)
+class PlayCard:
+    """Play one supported event or operation identified by its physical copy."""
+
+    card_instance_id: UUID
+
+
+@dataclass(frozen=True)
 class DiscardCards:
     """Choose all excess cards to discard simultaneously."""
 
@@ -50,4 +57,4 @@ class DiscardSelection:
     required_count: int
 
 
-GameCommand = ChooseMulligan | GainCredit | DrawCard | RemoveTag | PurgeVirusCounters | DiscardCards
+GameCommand = ChooseMulligan | GainCredit | DrawCard | RemoveTag | PurgeVirusCounters | DiscardCards | PlayCard
