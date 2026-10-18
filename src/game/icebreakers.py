@@ -11,6 +11,7 @@ from content.cards.models import CardDefinition, PaidAbility
 
 from .commands import UseCardAbility
 from .models import CardInstance, GameState, PlayerRole, PlayerState
+from .payments import runner_funds, spend_runner_credits
 from .setup import IllegalCommand
 
 
@@ -35,7 +36,7 @@ def validate_paid_ability(state: GameState, player: PlayerState, command: UseCar
         raise IllegalCommand("Choose an active supported paid ability you control")
     if state.window is None or state.window.kind != "paid" or state.window.player is not player.role:
         raise IllegalCommand("Use paid abilities only while you have priority")
-    funds = player.credits + (state.run.bad_publicity_credits if state.run else 0)
+    funds = runner_funds(state)
     if funds < ability.credit_cost:
         raise IllegalCommand("Not enough credits to use this ability")
     targets = command.subroutine_indices
@@ -89,10 +90,7 @@ def use_paid_ability(state: GameState, player: PlayerState, command: UseCardAbil
                      definitions: Mapping[str, CardDefinition]) -> None:
     """Pay from the run fund first; boosts outside an encounter expire at once."""
     ability = validate_paid_ability(state, player, command, definitions)
-    from_fund = min(ability.credit_cost, state.run.bad_publicity_credits) if state.run else 0
-    if state.run:
-        state.run.bad_publicity_credits -= from_fund
-    player.credits -= ability.credit_cost - from_fund
+    spend_runner_credits(state, ability.credit_cost)
     if ability.type == "break_subroutines":
         state.run.broken_subroutine_indices.extend(command.subroutine_indices)
     elif state.run and state.run.phase == "encounter":

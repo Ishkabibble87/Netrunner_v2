@@ -154,7 +154,8 @@ class GameScreen:
                     card = next((c for c in self.hand if c["instance_id"] == action["card_instance_id"]), None)
                     if card is not None:
                         cost = self.card_catalog.get(card["definition_id"], {}).get("play_cost", "?")
-                        choices.append(MenuChoice(f"Play {card['title']} · {cost} credits", "action", dict(action)))
+                        target = f" → {self._server_label(action['server_id'])}" if action.get("server_id") is not None else ""
+                        choices.append(MenuChoice(f"Play {card['title']}{target} · {cost} credits", "action", dict(action)))
                 elif action_type == "install_card" and self.submit_action is not None:
                     card = next((c for c in self.hand if c["instance_id"] == action["card_instance_id"]), None)
                     if card:
@@ -352,7 +353,11 @@ class GameScreen:
         run = self.state.get("run")
         if run:
             line(f"Run on {self._server_label(run['server_id'])} · {run['phase']}", "class:section")
-            line(f"Run credits: {run.get('bad_publicity_credits', 0)}")
+            line(f"Run credits: {run.get('bad_publicity_credits', 0)} bad publicity · {run.get('event_credits', 0)} event")
+            if run.get("source_event"):
+                line(f"Event: {run['source_event']['title']}")
+            if run.get("server_id") in {"hq", "rd"}:
+                line(f"Central accesses: {run.get('central_accesses', 0)}/{run.get('central_access_limit', 1)}")
             ice = run.get("current_ice")
             if ice:
                 line(f"{ice['title']} · strength {ice['strength']}", "class:card-title")

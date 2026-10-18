@@ -278,6 +278,9 @@ class RunState(DomainModel):
     current_ice_id: UUID | None = None
     broken_subroutine_indices: list[NonNegativeCounter] = Field(default_factory=list)
     strength_boosts: dict[UUID, NonNegativeCounter] = Field(default_factory=dict)
+    source_event_id: UUID | None = None
+    successful_draw: int = Field(default=0, ge=0)
+    additional_accesses: int = Field(default=0, ge=0)
     successful: bool = False
     access_limit: int = Field(default=1, ge=1)
     central_accesses: int = Field(default=0, ge=0)
@@ -377,6 +380,12 @@ class GameState(DomainModel):
             if self.window is not None and (self.window.kind != "paid" or self.window.run_continuation is None):
                 raise ValueError("A run window must have a supported run continuation")
             run = self.run
+            if run.source_event_id is not None:
+                event = self.card_instances.get(run.source_event_id)
+                if (event is None or event.owner_id != self.runner.player_id
+                        or event.location.zone is not CardZone.PLAY_AREA or not event.face_up
+                        or event.installed):
+                    raise ValueError("A run event must remain active in the Runner's play area")
             ice_ids = [*run.remaining_ice_ids, *([run.current_ice_id] if run.current_ice_id else [])]
             if len(ice_ids) != len(set(ice_ids)):
                 raise ValueError("Run positions must reference distinct ice")

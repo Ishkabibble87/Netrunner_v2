@@ -114,5 +114,22 @@
         "amount": 1
       }
     ]
-  }
+  },
+  "30028": [
+    {
+      "type": "initiate_run",
+      "servers": [
+        "hq",
+        "rd"
+      ],
+      "successful_draw": 1,
+      "additional_accesses": 1
+    }
+  ],
+  "30029": [
+    {
+      "type": "initiate_run",
+      "hosted_credits": 5
+    }
+  ]
 }

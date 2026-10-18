@@ -12,7 +12,12 @@ from application.sessions import advance_ai_decisions
 from game.models import CardZone, PlayerRole
 
 
-class IceEncounterTests(unittest.TestCase):
+class RunScenario(unittest.TestCase):
+    """API fixture shared by protected-run and run-event scenarios."""
+
+    corp_opening = ["Offworld Office", "Regolith Mining License", "Palisade", "Palisade", "Hedge Fund"]
+    runner_opening = ["Cleaver", "Cleaver", "Sure Gamble", "Sure Gamble", "Telework Contract"]
+
     def setUp(self):
         self.app = create_app()
         self.cards = self.app.state.card_definitions
@@ -26,8 +31,8 @@ class IceEncounterTests(unittest.TestCase):
         game = create_ai_game(player_id=uuid4(), decklist=profile.deck_selections[PlayerRole.CORP],
                               opponent_profile=profile, card_definitions=self.cards,
                               deck_orders={
-                                  PlayerRole.CORP: ordered(PlayerRole.CORP, ["Offworld Office", "Regolith Mining License", "Palisade", "Palisade", "Hedge Fund"]),
-                                  PlayerRole.RUNNER: ordered(PlayerRole.RUNNER, ["Cleaver", "Cleaver", "Sure Gamble", "Sure Gamble", "Telework Contract"]),
+                                  PlayerRole.CORP: ordered(PlayerRole.CORP, self.corp_opening),
+                                  PlayerRole.RUNNER: ordered(PlayerRole.RUNNER, self.runner_opening),
                               })
         self.session = self.app.state.sessions.create(game, profile.profile_id, [game.corp.player_id, game.runner.player_id])
         self.client = self.enterContext(TestClient(self.app))
@@ -109,6 +114,7 @@ class IceEncounterTests(unittest.TestCase):
             self.submit("runner", {"type": "pass_priority"})
         return self.view()
 
+class IceEncounterTests(RunScenario):
     def test_remote_priority_asset_rez_break_and_steal_publishes_both_views(self):
         office = self.install("Offworld Office", "new_remote")
         ice = self.install("Palisade", 1)
@@ -312,3 +318,194 @@ class IceEncounterTests(unittest.TestCase):
         self.assertIsNone(self.session.state.run)
         self.pass_windows()
         self.assertIs(self.session.state.turn.active_player, PlayerRole.CORP)
+
+
+class RunEventTests(RunScenario):
+    """Exercise event timing, distinct accesses, and restricted credit lifetimes."""
+
+    corp_opening = ["Offworld Office", "Regolith Mining License", "Palisade", "Palisade", "Manegarm Skunkworks"]
+    runner_opening = ["Jailbreak", "Jailbreak", "Overclock", "Overclock", "Cleaver"]
+
+    def play(self, title, server):
+        card = self.card(title)
+        self.submit("runner", {"type": "play_card", "card_instance_id": str(card.instance_id), "server_id": server})
+        self.assertEqual(self.session.state.card_instances[card.instance_id].location.zone, CardZone.PLAY_AREA)
+        return card.instance_id
+
+    def breach(self):
+        self.pass_windows()
+        self.submit("runner", {"type": "continue_run"})
+        self.pass_windows()
+
+    def test_jailbreak_distinct_accesses_draw_and_private_choices(self):
+        self.runner_turn()
+        for server in ("hq", "rd"):
+            with self.subTest(server=server):
+                before = self.view()
+                event = self.play("Jailbreak", server)
+                self.assertEqual(self.view()["you"]["clicks_remaining"], before["you"]["clicks_remaining"] - 1)
+                self.assertEqual(len(self.view()["you"]["hand"]), len(before["you"]["hand"]) - 1)
+                self.breach()
+                self.assertEqual(len(self.view()["you"]["hand"]), len(before["you"]["hand"]))
+                self.assertEqual(self.view()["run"]["central_access_limit"], 2)
+                seen = []
+                for _ in range(2):
+                    view = self.submit("runner", {"type": "access_card", "target": server})
+                    seen.append(view["run"]["current_card"]["instance_id"])
+                    if server == "rd":
+                        self.assertIsNone(self.view("corp")["run"]["current_card"])
+                    self.submit("runner", {"type": "finish_access"})
+                self.assertEqual(len(set(seen)), 2)
+                self.assertIsNone(self.session.state.run)
+                self.assertEqual(self.session.state.card_instances[event].location.zone, CardZone.DISCARD_PILE)
+                self.pass_windows()
+
+    def test_illegal_targets_and_failed_run_have_no_success_bonus(self):
+        ice = self.install("Palisade", "hq")
+        self.runner_turn()
+        jailbreak = self.card("Jailbreak")
+        for target in (None, "archives", 99):
+            self.reject("runner", {"type": "play_card", "card_instance_id": str(jailbreak.instance_id), "server_id": target})
+        hand_size = len(self.view()["you"]["hand"])
+        event = self.play("Jailbreak", "hq")
+        while self.session.state.run.phase != "approach" or self.session.state.window.player is not PlayerRole.CORP:
+            self.submit(self.session.state.window.player.value, {"type": "pass_priority"})
+        self.submit("corp", {"type": "rez_card", "card_instance_id": str(ice)})
+        self.pass_windows()
+        self.assertIsNone(self.session.state.run)
+        self.assertEqual(len(self.view()["you"]["hand"]), hand_size - 1)
+        self.assertEqual(self.session.state.card_instances[event].location.zone, CardZone.DISCARD_PILE)
+
+    def test_jailbreak_small_centrals_and_rd_removal(self):
+        from game.models import ZoneLocation
+
+        self.runner_turn()
+        # Leave two R&D cards, forcing the first to be an agenda that moves on access.
+        state = self.session.state
+        deck = sorted((c for c in state.card_instances.values() if c.location.zone is CardZone.DECK
+                       and c.owner_id == state.corp.player_id), key=lambda c: c.location.deck_position)
+        agenda = next(c for c in deck if self.cards[c.definition_id].card_type.value == "agenda")
+        other = next(c for c in deck if self.cards[c.definition_id].card_type.value != "agenda")
+        for card in deck:
+            card.face_up = False
+            card.location = ZoneLocation(zone=CardZone.DISCARD_PILE, player_id=state.corp.player_id)
+        for position, card in enumerate((agenda, other), 1):
+            card.location = ZoneLocation(zone=CardZone.DECK, player_id=state.corp.player_id, deck_position=position)
+        self.play("Jailbreak", "rd")
+        self.breach()
+        view = self.submit("runner", {"type": "access_card", "target": "rd"})
+        self.assertEqual(view["run"]["current_card"]["instance_id"], str(agenda.instance_id))
+        self.submit("runner", {"type": "finish_access"})
+        view = self.submit("runner", {"type": "access_card", "target": "rd"})
+        self.assertEqual(view["run"]["current_card"]["instance_id"], str(other.instance_id))
+        self.submit("runner", {"type": "finish_access"})
+        self.pass_windows()
+        self.play("Jailbreak", "rd")
+        self.breach()
+        self.submit("runner", {"type": "access_card", "target": "rd"})
+        self.submit("runner", {"type": "finish_access"})
+        self.assertIsNone(self.session.state.run)
+
+    def test_overclock_pays_breaker_and_trash_then_expires(self):
+        asset = self.install("Regolith Mining License", "new_remote")
+        ice = self.install("Palisade", 1)
+        self.runner_turn()
+        breaker = self.breaker()
+        self.session.state.runner.credits = 2
+        self.session.state.corp.bad_publicity = 1
+        event = self.play("Overclock", 1)
+        self.assertEqual(self.view()["run"]["event_credits"], 5)
+        self.assertEqual(self.view("corp")["run"]["source_event"]["title"], "Overclock")
+        self.assertEqual(self.session.state.runner.credits, 1)
+        while self.session.state.run.phase != "approach" or self.session.state.window.player is not PlayerRole.CORP:
+            self.submit(self.session.state.window.player.value, {"type": "pass_priority"})
+        self.submit("corp", {"type": "rez_card", "card_instance_id": str(ice)})
+        while self.session.state.run.phase != "encounter":
+            self.submit(self.session.state.window.player.value, {"type": "pass_priority"})
+        self.submit("runner", self.ability(breaker, "boost_strength"))
+        self.submit("runner", self.ability(breaker, "break_barrier", (0,)))
+        self.assertEqual(self.view()["run"]["event_credits"], 3)
+        self.assertEqual(self.session.state.runner.credits, 1)
+        self.breach()
+        self.submit("runner", {"type": "access_card", "target": str(asset)})
+        self.submit("runner", {"type": "finish_access", "trash": True})
+        self.assertEqual(self.session.state.runner.credits, 1)
+        self.assertEqual(self.session.state.card_instances[event].counters, {})
+        self.assertIsNone(self.session.state.run)
+        self.pass_windows()
+        event = self.play("Overclock", "archives")
+        self.pass_windows()
+        self.submit("runner", {"type": "jack_out"})
+        self.assertEqual(self.session.state.card_instances[event].counters, {})
+        self.assertEqual(self.session.state.runner.credits, 0)
+
+    def test_overclock_cost_and_last_click_cleanup(self):
+        self.runner_turn()
+        event = self.card("Overclock")
+        self.session.state.runner.credits = 0
+        self.reject("runner", {"type": "play_card", "card_instance_id": str(event.instance_id), "server_id": "hq"})
+        self.session.state.runner.credits = 1
+        self.session.state.runner.clicks_remaining = 1
+        turn = self.session.state.turn.number
+        event = self.play("Overclock", "hq")
+        self.assertEqual(self.session.state.runner.clicks_remaining, 0)
+        self.assertEqual(self.session.state.turn.number, turn)
+        self.pass_windows()
+        self.submit("runner", {"type": "jack_out"})
+        self.assertIsNone(self.session.state.run)
+        self.assertEqual(self.session.state.card_instances[event].counters, {})
+        self.assertEqual(self.session.state.card_instances[event].location.zone, CardZone.DISCARD_PILE)
+
+
+    def test_jailbreak_root_access_does_not_use_central_limit_and_empty_hq_finishes(self):
+        from game.models import ZoneLocation
+
+        asset = self.install("Manegarm Skunkworks", "hq")
+        self.runner_turn()
+        state = self.session.state
+        hand = [c for c in state.card_instances.values() if c.location.zone is CardZone.HAND
+                and c.owner_id == state.corp.player_id]
+        kept = next(c for c in hand if self.cards[c.definition_id].card_type.value != "agenda")
+        for card in hand:
+            if card is not kept:
+                card.face_up = False
+                card.location = ZoneLocation(zone=CardZone.DISCARD_PILE, player_id=state.corp.player_id)
+        self.play("Jailbreak", "hq")
+        self.breach()
+        self.submit("runner", {"type": "access_card", "target": str(asset)})
+        self.submit("runner", {"type": "finish_access"})
+        self.assertEqual(self.session.state.run.central_accesses, 0)
+        self.submit("runner", {"type": "access_card", "target": "hq"})
+        self.submit("runner", {"type": "finish_access"})
+        self.assertIsNone(self.session.state.run)
+        self.pass_windows()
+        kept = self.session.state.card_instances[kept.instance_id]
+        kept.face_up = False
+        kept.location = ZoneLocation(zone=CardZone.DISCARD_PILE, player_id=state.corp.player_id)
+        self.play("Jailbreak", "hq")
+        self.breach()
+        self.assertNotIn({"type": "access_card", "target": "hq"}, self.view()["legal_actions"])
+        self.submit("runner", {"type": "access_card", "target": str(asset)})
+        self.submit("runner", {"type": "finish_access"})
+        self.assertIsNone(self.session.state.run)
+
+    def test_overclock_insufficient_hosted_funds_and_ice_end_cleanup(self):
+        ice = self.install("Palisade", "hq")
+        self.runner_turn()
+        breaker = self.breaker()
+        self.session.state.runner.credits = 1
+        event = self.play("Overclock", "hq")
+        while self.session.state.run.phase != "approach" or self.session.state.window.player is not PlayerRole.CORP:
+            self.submit(self.session.state.window.player.value, {"type": "pass_priority"})
+        self.submit("corp", {"type": "rez_card", "card_instance_id": str(ice)})
+        while self.session.state.run.phase != "encounter":
+            self.submit(self.session.state.window.player.value, {"type": "pass_priority"})
+        for _ in range(2):
+            self.submit("runner", self.ability(breaker, "boost_strength"))
+        self.assertEqual(self.view()["run"]["event_credits"], 1)
+        self.reject("runner", self.ability(breaker, "boost_strength"))
+        self.pass_windows()
+        self.assertIsNone(self.session.state.run)
+        self.assertEqual(self.session.state.card_instances[event].counters, {})
+        self.assertEqual(self.session.state.runner.credits, 0)
+        self.assertEqual(self.session.state.card_instances[event].location.zone, CardZone.DISCARD_PILE)
