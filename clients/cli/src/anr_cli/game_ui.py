@@ -120,7 +120,7 @@ class GameScreen:
                     if action_type == "run_server":
                         label = f"Run {self._server_label(action['server_id'])} · 1 click"
                     elif action_type == "continue_run":
-                        label = "Continue to server"
+                        label = "Continue inward"
                     elif action_type == "jack_out":
                         label = "Jack out"
                     elif action_type == "access_card":
@@ -160,7 +160,9 @@ class GameScreen:
                     if card:
                         target = ("your rig" if action.get("server_id") is None else
                                   "new remote" if action["server_id"] == "new_remote" else self._server_label(action["server_id"]))
-                        replacement = " · replace existing card" if action.get("trash_card_instance_ids") else ""
+                        trash_titles = [c["card"]["title"] for c in self.state.get("installed_cards", [])
+                                        if c["instance_id"] in action.get("trash_card_instance_ids", []) and c.get("card")]
+                        replacement = " · trash " + ", ".join(trash_titles) if trash_titles else ""
                         cost = self.card_catalog.get(card["definition_id"], {}).get("install_cost")
                         suffix = f" · {cost} {'credit' if cost == 1 else 'credits'}" if action.get("server_id") is None else ""
                         choices.append(MenuChoice(f"Install {card['title']} in {target}{replacement} · 1 click{suffix}", "action", dict(action)))
@@ -173,7 +175,11 @@ class GameScreen:
                         label = f"Rez {title} · {cost} credits"
                     else:
                         ability = card.get("ability_labels", {}).get(action["ability_id"], action["ability_id"])
-                        label = f"{title}: {ability} · 1 click"
+                        suffix = "" if action["ability_id"] in card.get("paid_ability_ids", []) else " · 1 click"
+                        targets = action.get("subroutine_indices", [])
+                        if targets:
+                            suffix += " · subroutines " + ", ".join(str(i + 1) for i in targets)
+                        label = f"{title}: {ability}{suffix}"
                     choices.append(MenuChoice(label, "action", dict(action)))
                 elif action_type in {"advance_card", "score_agenda", "resolve_reaction"} and self.submit_action is not None:
                     installed = [c["card"] for c in self.state.get("installed_cards", []) if c.get("card")]
@@ -347,6 +353,17 @@ class GameScreen:
         if run:
             line(f"Run on {self._server_label(run['server_id'])} · {run['phase']}", "class:section")
             line(f"Run credits: {run.get('bad_publicity_credits', 0)}")
+            ice = run.get("current_ice")
+            if ice:
+                line(f"{ice['title']} · strength {ice['strength']}", "class:card-title")
+            elif run.get("current_ice_id"):
+                line("Approaching facedown ice")
+            for sub in run.get("subroutines", []):
+                line(f"{sub['index'] + 1}. {sub['label']} · {'broken' if sub['broken'] else 'unbroken'}")
+            for installed in self.state.get("installed_cards", []):
+                breaker = installed.get("card") or {}
+                if installed.get("area") == "rig" and breaker.get("strength") is not None:
+                    line(f"{breaker['title']} · strength {breaker['strength']}")
             card = run.get("current_card")
             if card:
                 line(f"Accessing {card['title']}", "class:card-title")
@@ -367,6 +384,7 @@ class GameScreen:
         runner_stats = (
             f"{runner.get('credits', 0)} credits · {runner_hand} cards in grip"
         )
+        runner_stats += f" · {runner.get('memory_used', 0)}/{runner.get('memory_limit', 4)} MU"
         if runner.get("tags", 0):
             runner_stats += f" · {runner['tags']} tags"
         if self.viewer_role == "corp":
@@ -568,7 +586,7 @@ class GameScreen:
         decision = self.state.get("decision") or {}
         if decision.get("type") in {"paid_ability_window", "resolve_reaction"}:
             who = "You" if decision["player"] == self.viewer_role else str(decision["player"]).title()
-            return f"{who}: " + ("scoring window · score or pass" if decision["type"] == "paid_ability_window" else "resolve scoring reaction")
+            return f"{who}: " + ("paid ability window · act or pass" if decision["type"] == "paid_ability_window" else "resolve scoring reaction")
         if decision.get("type") == "discard_to_hand_limit":
             who = "You" if decision["player"] == self.viewer_role else str(decision["player"]).title()
             return f"{who} must discard {decision['cards_to_discard']} cards"

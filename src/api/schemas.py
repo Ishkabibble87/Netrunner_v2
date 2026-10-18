@@ -41,7 +41,8 @@ from game.commands import (
     UseCardAbility,
 )
 from game.engine import legal_actions_for, pending_decision
-from game.installation import agenda_points
+from game.icebreakers import effective_strength
+from game.installation import agenda_points, installed_programs
 from game.models import (
     CardZone,
     DeckSelection,
@@ -145,6 +146,7 @@ class UseCardAbilityCommandRequest(ApiModel):
     type: Literal["use_card_ability"]
     card_instance_id: UUID
     ability_id: str = Field(min_length=1)
+    subroutine_indices: list[Annotated[int, Field(ge=0)]] = Field(default_factory=list)
 
 
 class AdvanceCardCommandRequest(ApiModel):
@@ -235,7 +237,7 @@ def game_command_from_request(request: PlayerCommandRequest) -> GameCommand:
     if isinstance(request, RezCardCommandRequest):
         return RezCard(request.card_instance_id)
     if isinstance(request, UseCardAbilityCommandRequest):
-        return UseCardAbility(request.card_instance_id, request.ability_id)
+        return UseCardAbility(request.card_instance_id, request.ability_id, tuple(request.subroutine_indices))
     if isinstance(request, AdvanceCardCommandRequest):
         return AdvanceCard(request.card_instance_id)
     if isinstance(request, ScoreAgendaCommandRequest):
@@ -280,7 +282,7 @@ def command_request_from_game(command: GameCommand | DiscardSelection) -> LegalA
         return RezCardCommandRequest(type="rez_card", card_instance_id=command.card_instance_id)
     if isinstance(command, UseCardAbility):
         return UseCardAbilityCommandRequest(type="use_card_ability", card_instance_id=command.card_instance_id,
-                                           ability_id=command.ability_id)
+                                           ability_id=command.ability_id, subroutine_indices=list(command.subroutine_indices))
     if isinstance(command, AdvanceCard):
         return AdvanceCardCommandRequest(type="advance_card", card_instance_id=command.card_instance_id)
     if isinstance(command, ScoreAgenda):
@@ -318,6 +320,8 @@ class CardView(ApiModel):
     title: str
     card_type: CardType
     ability_labels: dict[str, str] = Field(default_factory=dict)
+    paid_ability_ids: list[str] = Field(default_factory=list)
+    strength: int | None = None
 
 
 class InstalledCardView(ApiModel):
@@ -348,6 +352,8 @@ class PlayerSummary(ApiModel):
     credits: int
     clicks_remaining: int
     tags: int
+    memory_limit: int | None = None
+    memory_used: int = 0
     identity: CardView
     deck_count: int
     maximum_hand_size: int
@@ -365,6 +371,14 @@ class OpponentView(PlayerSummary):
     hand_count: int
 
 
+class SubroutineView(ApiModel):
+    """An ordered public subroutine and its status in the current encounter."""
+
+    index: int = Field(ge=0)
+    label: str
+    broken: bool
+
+
 class RunView(ApiModel):
     """Public run progress and viewer-specific temporary access information."""
 
@@ -373,6 +387,10 @@ class RunView(ApiModel):
     successful: bool
     bad_publicity_credits: int
     current_card: CardView | None
+    current_ice_id: UUID | None = None
+    current_ice: CardView | None = None
+    subroutines: list[SubroutineView] = Field(default_factory=list)
+    rez_allowed: bool = False
     accessed_cards: list[CardView]
     access_note: str = "Card-specific access abilities are not implemented yet."
 
@@ -420,7 +438,9 @@ class InitialGameView(ApiModel):
                 definition_id=instance.definition_id,
                 title=definition.title,
                 card_type=definition.card_type,
-                ability_labels={a.ability_id: a.label for a in definition.action_abilities},
+                ability_labels={a.ability_id: a.label for a in (*definition.action_abilities, *definition.paid_abilities)},
+                paid_ability_ids=[a.ability_id for a in definition.paid_abilities],
+                strength=effective_strength(state, instance, definition) if definition.strength is not None else None,
             )
 
         def player_summary(player: PlayerState) -> PlayerSummary:
@@ -434,6 +454,9 @@ class InitialGameView(ApiModel):
                 credits=player.credits,
                 clicks_remaining=player.clicks_remaining,
                 tags=player.tags,
+                memory_limit=player.memory_limit,
+                memory_used=sum(card_definitions[c.definition_id].memory_cost or 0
+                                for c in installed_programs(state, player, card_definitions)),
                 maximum_hand_size=maximum_hand_size(player),
                 discard_count=sum(card.location.zone is CardZone.DISCARD_PILE
                                   and card.location.player_id == player.player_id
@@ -471,6 +494,15 @@ class InitialGameView(ApiModel):
             run=RunView(
                 server_id=state.run.server_id, phase=state.run.phase,
                 successful=state.run.successful,
+                current_ice_id=state.run.current_ice_id,
+                current_ice=card_view(state.run.current_ice_id)
+                    if state.run.current_ice_id and (you.role is PlayerRole.CORP
+                       or state.card_instances[state.run.current_ice_id].face_up) else None,
+                subroutines=[{"index": i, "label": sub.label,
+                              "broken": i in state.run.broken_subroutine_indices}
+                             for i, sub in enumerate(card_definitions[state.card_instances[state.run.current_ice_id].definition_id].subroutines or ())]
+                    if state.run.current_ice_id and state.card_instances[state.run.current_ice_id].rezzed else [],
+                rez_allowed=bool(state.window and state.window.rez_allowed),
                 bad_publicity_credits=state.run.bad_publicity_credits,
                 current_card=card_view(state.run.current_card_id)
                     if state.run.current_card_id in visible_ids else None,
@@ -572,4 +604,4 @@ class CardCatalogEntry(ApiModel):
     @classmethod
     def from_definition(cls, definition: CardDefinition) -> "CardCatalogEntry":
         return cls(**definition.model_dump(exclude={"play_instructions", "score_instructions", "install_instructions",
-                                                   "rez_instructions", "action_abilities", "trash_when_empty"}))
+                                                   "rez_instructions", "action_abilities", "trash_when_empty", "paid_abilities", "subroutines", "remote_strength_bonus"}))

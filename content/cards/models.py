@@ -70,6 +70,22 @@ class ActionAbility(CardContentModel):
     instructions: tuple[PlayInstruction, ...]
 
 
+class PaidAbility(CardContentModel):
+    """The first breaker abilities: encounter strength and barrier interfaces."""
+
+    ability_id: str = Field(min_length=1)
+    label: str = Field(min_length=1)
+    type: Literal["boost_strength", "break_subroutines"]
+    credit_cost: int = Field(ge=0)
+    amount: int = Field(gt=0)
+    subtype: str | None = None
+
+
+class EndRun(CardContentModel):
+    type: Literal["end_run"] = "end_run"
+    label: str = "End the run"
+
+
 class AuthoredAbilities(CardContentModel):
     """Executable instructions authored separately from imported display metadata."""
 
@@ -79,6 +95,9 @@ class AuthoredAbilities(CardContentModel):
     rez_instructions: tuple[PlayInstruction, ...] | None = None
     action_abilities: tuple[ActionAbility, ...] = ()
     trash_when_empty: bool = False
+    paid_abilities: tuple[PaidAbility, ...] = ()
+    subroutines: tuple[EndRun, ...] | None = None
+    remote_strength_bonus: int = Field(default=0, ge=0)
 
 
 class CardDefinition(CardContentModel):
@@ -103,6 +122,9 @@ class CardDefinition(CardContentModel):
     rez_instructions: tuple[PlayInstruction, ...] | None = None
     action_abilities: tuple[ActionAbility, ...] = ()
     trash_when_empty: bool = False
+    paid_abilities: tuple[PaidAbility, ...] = ()
+    subroutines: tuple[EndRun, ...] | None = None
+    remote_strength_bonus: int = Field(default=0, ge=0)
 
     play_cost: int | None = Field(default=None, ge=0)
     install_cost: int | None = Field(default=None, ge=0)

@@ -260,18 +260,24 @@ class PriorityWindow(DomainModel):
     kind: Literal["paid", "reaction"]
     player: PlayerRole
     pending_card_ids: list[UUID] = Field(default_factory=list)
-    run_continuation: Literal["movement", "breach"] | None = None
+    run_continuation: Literal["movement", "breach", "approach", "encounter", "resolve_subroutines", "approach_next"] | None = None
+    rez_allowed: bool = True
+    opponent_passed: bool = False
 
 
 class RunState(DomainModel):
-    """A paused unprotected run; card visibility lasts only through its breach.
+    """A paused run and its current encounter; card visibility lasts only through its breach.
 
     Remote cleanup is deferred until the run ends because remote IDs are display
     positions and may be renumbered when the accessed card leaves its server.
     """
 
     server_id: ServerId
-    phase: Literal["movement", "breach", "access"] = "movement"
+    phase: Literal["initiation", "approach", "encounter", "movement", "breach", "access"] = "movement"
+    remaining_ice_ids: list[UUID] = Field(default_factory=list)
+    current_ice_id: UUID | None = None
+    broken_subroutine_indices: list[NonNegativeCounter] = Field(default_factory=list)
+    strength_boosts: dict[UUID, NonNegativeCounter] = Field(default_factory=dict)
     successful: bool = False
     access_limit: int = Field(default=1, ge=1)
     central_accesses: int = Field(default=0, ge=0)
@@ -370,6 +376,22 @@ class GameState(DomainModel):
                 raise ValueError("The attacked server must exist during a run")
             if self.window is not None and (self.window.kind != "paid" or self.window.run_continuation is None):
                 raise ValueError("A run window must have a supported run continuation")
+            run = self.run
+            ice_ids = [*run.remaining_ice_ids, *([run.current_ice_id] if run.current_ice_id else [])]
+            if len(ice_ids) != len(set(ice_ids)):
+                raise ValueError("Run positions must reference distinct ice")
+            for instance_id in ice_ids:
+                ice = self.card_instances.get(instance_id)
+                if (ice is None or not ice.installed or ice.location.server is None
+                        or ice.location.server.area is not ServerArea.ICE
+                        or ice.location.server.server_id != run.server_id):
+                    raise ValueError("Run positions must reference installed ice protecting the attacked server")
+            if (run.phase in {"approach", "encounter"}) != (run.current_ice_id is not None):
+                raise ValueError("Only approach and encounter phases have a current ice")
+            if run.phase != "encounter" and (run.strength_boosts or run.broken_subroutine_indices):
+                raise ValueError("Encounter effects cannot outlast their encounter")
+            if len(run.broken_subroutine_indices) != len(set(run.broken_subroutine_indices)):
+                raise ValueError("Each subroutine can be broken only once per encounter")
             if (self.run.phase == "access") != (self.run.current_card_id is not None):
                 raise ValueError("Only an access phase has a current card")
             if self.run.current_card_id is not None and self.run.current_card_id not in self.run.visible_card_ids:

@@ -119,7 +119,7 @@ class InstalledEconomyTests(unittest.TestCase):
         ability = {"type": "use_card_ability", "card_instance_id": first, "ability_id": "take_credits"}
         self.submit("runner", ability)
         self.reject("runner", ability)
-        self.assertIn(dict(ability, card_instance_id=second), self.view("runner")["legal_actions"])
+        self.assertIn(dict(ability, card_instance_id=second, subroutine_indices=[]), self.view("runner")["legal_actions"])
         self.submit("runner", dict(ability, card_instance_id=second))
         self.assertEqual(self.session.state.runner.credits, 9)
         self.assertTrue(all(c["counters"] == {"credit": 6} for c in self.view("corp")["installed_cards"]))

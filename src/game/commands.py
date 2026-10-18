@@ -95,14 +95,14 @@ class ResolveReaction:
 
 @dataclass(frozen=True)
 class RunServer:
-    """Spend one Runner click to initiate a run on an unprotected server."""
+    """Spend one Runner click to initiate a run on an existing server."""
 
     server_id: ServerId
 
 
 @dataclass(frozen=True)
 class ContinueRun:
-    """Decline to jack out and proceed to success and breach."""
+    """Decline to jack out and proceed inward toward the server."""
 
 
 @dataclass(frozen=True)
@@ -133,10 +133,11 @@ class RezCard:
 
 @dataclass(frozen=True)
 class UseCardAbility:
-    """Activate an authored action ability on a controlled installed card."""
+    """Activate an authored action or paid ability on a controlled installed card."""
 
     card_instance_id: UUID
     ability_id: str
+    subroutine_indices: tuple[int, ...] = ()
 
 
 GameCommand = RezCard | UseCardAbility | RunServer | ContinueRun | JackOut | AccessCard | FinishAccess | InstallCard | AdvanceCard | ScoreAgenda | PassPriority | ResolveReaction | ChooseMulligan | GainCredit | DrawCard | RemoveTag | PurgeVirusCounters | DiscardCards | PlayCard

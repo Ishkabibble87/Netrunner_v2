@@ -44,11 +44,17 @@ def validate_rez(state: GameState, player: PlayerState, instance_id: UUID,
     """Reject unsupported cards, insufficient funds, and invalid rez windows."""
     card, definition = controlled_card(state, player, instance_id, definitions)
     if (player.role is not PlayerRole.CORP or definition.side is not CardSide.CORP
-            or definition.card_type not in {CardType.ASSET, CardType.UPGRADE}
+            or definition.card_type not in {CardType.ASSET, CardType.UPGRADE, CardType.ICE}
             or card.rezzed or definition.rez_instructions is None):
-        raise IllegalCommand("Choose an unrezzed asset or upgrade with supported abilities")
+        raise IllegalCommand("Choose an unrezzed Corp card with supported abilities")
     if state.window is None or state.window.kind != "paid" or state.window.player is not player.role:
         raise IllegalCommand("Rez only while you have priority in an eligible paid ability window")
+    if not state.window.rez_allowed:
+        raise IllegalCommand("Cards cannot be rezzed in this paid ability window")
+    if definition.card_type is CardType.ICE and (
+            state.run is None or state.run.phase != "approach"
+            or state.run.current_ice_id != instance_id or definition.subroutines is None):
+        raise IllegalCommand("Rez only the supported ice currently being approached")
     if definition.rez_cost is None or player.credits < definition.rez_cost:
         raise IllegalCommand("Not enough credits to rez this card")
     return card, definition
@@ -70,6 +76,8 @@ def validate_ability(state: GameState, player: PlayerState, command: UseCardAbil
     if (ability is None or not card.face_up
             or (definition.side is CardSide.CORP and not card.rezzed)):
         raise IllegalCommand("Choose an active supported ability")
+    if command.subroutine_indices:
+        raise IllegalCommand("Action abilities do not target subroutines")
     if player.clicks_remaining < ability.click_cost:
         raise IllegalCommand("Not enough clicks to use this ability")
     if ability.once_per_turn and card.ability_last_used_turn.get(ability.ability_id) == state.turn.number:
