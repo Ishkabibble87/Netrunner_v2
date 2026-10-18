@@ -1,7 +1,7 @@
-"""Corp installation, advancement, scoring, and remote-server cleanup.
+"""Corp and supported Runner resource installation, scoring, and server cleanup.
 
 Only agendas with authored scoring instructions can be installed in this slice.
-Other Corp permanents can be installed, but rezzing and their abilities follow later.
+Other Corp permanents can be installed; only authored abilities can be activated.
 No rule behavior is inferred from printed text.
 """
 
@@ -11,6 +11,7 @@ from uuid import UUID
 from content.cards.models import CardDefinition, CardSide, CardType
 
 from .commands import InstallCard
+from .installed_abilities import resolve_lifecycle
 from .models import (
     CardInstance,
     CardZone,
@@ -43,6 +44,17 @@ def validate_install(state: GameState, player: PlayerState, command: InstallCard
     """Validate destination, optional trash choices, and installation costs."""
     card = state.card_instances.get(command.card_instance_id)
     definition = definitions.get(card.definition_id) if card else None
+    if player.role is PlayerRole.RUNNER:
+        if (card is None or definition is None or card.owner_id != player.player_id
+                or card.controller_id != player.player_id or card.location.zone is not CardZone.HAND
+                or card.location.player_id != player.player_id or definition.side is not CardSide.RUNNER
+                or definition.card_type is not CardType.RESOURCE or definition.install_instructions is None):
+            raise IllegalCommand("Choose a supported resource from your hand")
+        if command.server_id is not None or command.trash_card_instance_ids:
+            raise IllegalCommand("Runner resources have no server or replacement trash choices")
+        if definition.install_cost is None or player.credits < definition.install_cost:
+            raise IllegalCommand("Not enough credits to install this resource")
+        return definition, definition.install_cost
     if (player.role is not PlayerRole.CORP or card is None
             or card.owner_id != player.player_id or card.controller_id != player.player_id
             or card.location.zone is not CardZone.HAND or card.location.player_id != player.player_id
@@ -78,6 +90,16 @@ def install_card(state: GameState, player: PlayerState, command: InstallCard,
                  definitions: Mapping[str, CardDefinition]) -> None:
     """Install on a working copy, keeping a replacement's destination alive."""
     definition, cost = validate_install(state, player, command, definitions)
+    if player.role is PlayerRole.RUNNER:
+        player.credits -= cost
+        player.clicks_remaining -= 1
+        card = state.card_instances[command.card_instance_id].model_copy(update={
+            "installed": True, "rezzed": False, "face_up": True,
+            "location": ZoneLocation(zone=CardZone.PLAY_AREA),
+        })
+        state.card_instances[card.instance_id] = card
+        resolve_lifecycle(state, player, card, definition.install_instructions, definition)
+        return
     target = command.server_id
     if target == "new_remote":
         target = 1 + sum(isinstance(s, int) for s in state.servers)
@@ -85,7 +107,8 @@ def install_card(state: GameState, player: PlayerState, command: InstallCard,
     for instance_id in command.trash_card_instance_ids:
         card = state.card_instances[instance_id]
         state.card_instances[instance_id] = card.model_copy(update={
-            "installed": False, "rezzed": False, "counters": {},
+            "installed": False, "rezzed": False, "counters": {}, "ability_last_used_turn": {},
+            "controller_id": None,
             "location": ZoneLocation(zone=CardZone.DISCARD_PILE, player_id=player.player_id)})
     ice = sorted((c for c in state.card_instances.values() if c.installed and c.location.server
                   and c.location.server.server_id == target and c.location.server.area is ServerArea.ICE),

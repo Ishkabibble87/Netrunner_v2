@@ -159,6 +159,7 @@ class CardInstance(DomainModel):
     )
     installed: bool = False
     rezzed: bool = False
+    ability_last_used_turn: dict[str, int] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def instance_state_is_consistent(self) -> "CardInstance":
@@ -250,7 +251,7 @@ class TurnState(DomainModel):
 
 
 class PriorityWindow(DomainModel):
-    """A scoring window or reaction, with a continuation in TurnState.step.
+    """A paid window or reaction, continuing a turn or suspended run.
 
     Players without supported choices pass automatically. Empty scoring windows
     remain visible while Corp cards are installed, concealing agenda eligibility.
@@ -259,6 +260,7 @@ class PriorityWindow(DomainModel):
     kind: Literal["paid", "reaction"]
     player: PlayerRole
     pending_card_ids: list[UUID] = Field(default_factory=list)
+    run_continuation: Literal["movement", "breach"] | None = None
 
 
 class RunState(DomainModel):
@@ -360,12 +362,14 @@ class GameState(DomainModel):
                     )
 
         if self.run is not None:
-            if (self.window is not None or self.setup.pending_player is not None
+            if (self.setup.pending_player is not None
                     or self.turn is None or self.turn.active_player is not PlayerRole.RUNNER
                     or self.turn.phase is not TurnPhase.ACTION):
                 raise ValueError("A run requires the Runner action phase without another priority window")
             if self.run.server_id not in self.servers:
                 raise ValueError("The attacked server must exist during a run")
+            if self.window is not None and (self.window.kind != "paid" or self.window.run_continuation is None):
+                raise ValueError("A run window must have a supported run continuation")
             if (self.run.phase == "access") != (self.run.current_card_id is not None):
                 raise ValueError("Only an access phase has a current card")
             if self.run.current_card_id is not None and self.run.current_card_id not in self.run.visible_card_ids:

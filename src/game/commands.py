@@ -60,10 +60,10 @@ class DiscardSelection:
 
 @dataclass(frozen=True)
 class InstallCard:
-    """Install a Corp card, optionally trashing like cards in its destination."""
+    """Install a card; Runner cards have no server destination."""
 
     card_instance_id: UUID
-    server_id: ServerId | Literal["new_remote"]
+    server_id: ServerId | Literal["new_remote"] | None = None
     trash_card_instance_ids: tuple[UUID, ...] = ()
 
 
@@ -124,4 +124,19 @@ class FinishAccess:
     trash: bool = False
 
 
-GameCommand = RunServer | ContinueRun | JackOut | AccessCard | FinishAccess | InstallCard | AdvanceCard | ScoreAgenda | PassPriority | ResolveReaction | ChooseMulligan | GainCredit | DrawCard | RemoveTag | PurgeVirusCounters | DiscardCards | PlayCard
+@dataclass(frozen=True)
+class RezCard:
+    """Pay the rez cost of a supported installed Corp card."""
+
+    card_instance_id: UUID
+
+
+@dataclass(frozen=True)
+class UseCardAbility:
+    """Activate an authored action ability on a controlled installed card."""
+
+    card_instance_id: UUID
+    ability_id: str
+
+
+GameCommand = RezCard | UseCardAbility | RunServer | ContinueRun | JackOut | AccessCard | FinishAccess | InstallCard | AdvanceCard | ScoreAgenda | PassPriority | ResolveReaction | ChooseMulligan | GainCredit | DrawCard | RemoveTag | PurgeVirusCounters | DiscardCards | PlayCard

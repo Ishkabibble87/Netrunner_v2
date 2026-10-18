@@ -35,6 +35,23 @@
       "type": "lose_click_if_any"
     }
   ],
+  "30071": {
+    "rez_instructions": [{"type": "load_credits", "amount": 15}],
+    "trash_when_empty": true,
+    "action_abilities": [{
+      "ability_id": "take_credits", "label": "Take 3 hosted credits",
+      "instructions": [{"type": "take_credits", "amount": 3}]
+    }]
+  },
+  "30027": {
+    "install_instructions": [{"type": "load_credits", "amount": 9}],
+    "trash_when_empty": true,
+    "action_abilities": [{
+      "ability_id": "take_credits", "label": "Take 3 hosted credits (once per turn)",
+      "once_per_turn": true,
+      "instructions": [{"type": "take_credits", "amount": 3}]
+    }]
+  },
   "30067": {
     "score_instructions": [
       {

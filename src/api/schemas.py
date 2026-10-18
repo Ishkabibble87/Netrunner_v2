@@ -35,8 +35,10 @@ from game.commands import (
     PurgeVirusCounters,
     RemoveTag,
     ResolveReaction,
+    RezCard,
     RunServer,
     ScoreAgenda,
+    UseCardAbility,
 )
 from game.engine import legal_actions_for, pending_decision
 from game.installation import agenda_points
@@ -130,8 +132,19 @@ class PurgeVirusCountersCommandRequest(ApiModel):
 class InstallCardCommandRequest(ApiModel):
     type: Literal["install_card"]
     card_instance_id: UUID
-    server_id: ServerId | Literal["new_remote"]
+    server_id: ServerId | Literal["new_remote"] | None = None
     trash_card_instance_ids: list[UUID] = Field(default_factory=list)
+
+
+class RezCardCommandRequest(ApiModel):
+    type: Literal["rez_card"]
+    card_instance_id: UUID
+
+
+class UseCardAbilityCommandRequest(ApiModel):
+    type: Literal["use_card_ability"]
+    card_instance_id: UUID
+    ability_id: str = Field(min_length=1)
 
 
 class AdvanceCardCommandRequest(ApiModel):
@@ -190,6 +203,8 @@ PlayerCommandRequest = Annotated[
     | DiscardCardsCommandRequest
     | PlayCardCommandRequest
     | InstallCardCommandRequest
+    | RezCardCommandRequest
+    | UseCardAbilityCommandRequest
     | AdvanceCardCommandRequest
     | ScoreAgendaCommandRequest
     | PassPriorityCommandRequest
@@ -217,6 +232,10 @@ def game_command_from_request(request: PlayerCommandRequest) -> GameCommand:
         return PlayCard(request.card_instance_id)
     if isinstance(request, InstallCardCommandRequest):
         return InstallCard(request.card_instance_id, request.server_id, tuple(request.trash_card_instance_ids))
+    if isinstance(request, RezCardCommandRequest):
+        return RezCard(request.card_instance_id)
+    if isinstance(request, UseCardAbilityCommandRequest):
+        return UseCardAbility(request.card_instance_id, request.ability_id)
     if isinstance(request, AdvanceCardCommandRequest):
         return AdvanceCard(request.card_instance_id)
     if isinstance(request, ScoreAgendaCommandRequest):
@@ -257,6 +276,11 @@ def command_request_from_game(command: GameCommand | DiscardSelection) -> LegalA
     if isinstance(command, InstallCard):
         return InstallCardCommandRequest(type="install_card", card_instance_id=command.card_instance_id,
             server_id=command.server_id, trash_card_instance_ids=list(command.trash_card_instance_ids))
+    if isinstance(command, RezCard):
+        return RezCardCommandRequest(type="rez_card", card_instance_id=command.card_instance_id)
+    if isinstance(command, UseCardAbility):
+        return UseCardAbilityCommandRequest(type="use_card_ability", card_instance_id=command.card_instance_id,
+                                           ability_id=command.ability_id)
     if isinstance(command, AdvanceCard):
         return AdvanceCardCommandRequest(type="advance_card", card_instance_id=command.card_instance_id)
     if isinstance(command, ScoreAgenda):
@@ -293,13 +317,16 @@ class CardView(ApiModel):
     definition_id: str
     title: str
     card_type: CardType
+    ability_labels: dict[str, str] = Field(default_factory=dict)
 
 
 class InstalledCardView(ApiModel):
     """Public position and counters, with identity concealed from the Runner."""
 
     instance_id: UUID
-    server_id: ServerId
+    server_id: ServerId | None
+    controller_id: UUID
+    rezzed: bool
     area: str
     ice_distance_from_server: int | None
     face_up: bool
@@ -393,6 +420,7 @@ class InitialGameView(ApiModel):
                 definition_id=instance.definition_id,
                 title=definition.title,
                 card_type=definition.card_type,
+                ability_labels={a.ability_id: a.label for a in definition.action_abilities},
             )
 
         def player_summary(player: PlayerState) -> PlayerSummary:
@@ -469,11 +497,13 @@ class InitialGameView(ApiModel):
                 hand_count=opponent_hand_count,
             ),
             installed_cards=[InstalledCardView(
-                instance_id=c.instance_id, server_id=c.location.server.server_id,
-                area=c.location.server.area.value, ice_distance_from_server=c.location.server.ice_distance_from_server,
+                instance_id=c.instance_id, server_id=c.location.server.server_id if c.location.server else None,
+                controller_id=c.controller_id, rezzed=c.rezzed,
+                area=c.location.server.area.value if c.location.server else "rig",
+                ice_distance_from_server=c.location.server.ice_distance_from_server if c.location.server else None,
                 face_up=bool(c.face_up), counters=c.counters,
                 card=card_view(c.instance_id) if c.face_up or c.controller_id == viewer_player_id or c.instance_id in visible_ids else None)
-                for c in state.card_instances.values() if c.installed and c.location.server],
+                for c in state.card_instances.values() if c.installed],
             servers=[
                 server.value if hasattr(server, "value") else server
                 for server in state.servers
@@ -541,4 +571,5 @@ class CardCatalogEntry(ApiModel):
 
     @classmethod
     def from_definition(cls, definition: CardDefinition) -> "CardCatalogEntry":
-        return cls(**definition.model_dump(exclude={"play_instructions", "score_instructions"}))
+        return cls(**definition.model_dump(exclude={"play_instructions", "score_instructions", "install_instructions",
+                                                   "rez_instructions", "action_abilities", "trash_when_empty"}))
