@@ -21,6 +21,7 @@ from .models import (
     ServerArea,
     ZoneLocation,
 )
+from .priority import open_paid_window
 from .setup import IllegalCommand
 
 
@@ -83,6 +84,7 @@ def resolve_run_command(state: GameState, command, definitions: Mapping[str, Car
         state.runner.clicks_remaining -= 1
         state.run = RunState(server_id=command.server_id,
                              bad_publicity_credits=state.corp.bad_publicity)
+        open_paid_window(state, "movement")  # CR 6.9.1e, before the jack-out choice.
         return
     run = state.run
     if command not in run_actions(state, definitions):
@@ -91,12 +93,11 @@ def resolve_run_command(state: GameState, command, definitions: Mapping[str, Car
         end_run(state)
         return
     if isinstance(command, ContinueRun):
-        run.successful = True
-        run.phase = "breach"
-        if run.server_id is CentralServer.ARCHIVES:
-            for card in state.card_instances.values():
-                if card.location.zone is CardZone.DISCARD_PILE and card.owner_id == state.corp.player_id:
-                    card.face_up = True
+        open_paid_window(state, "breach")  # CR 6.9.4e, after declining to jack out.
+        if state.window is not None:
+            return
+        begin_breach(state)
+        return
     elif isinstance(command, AccessCard):
         if command.target in {"hq", "rd"}:
             zone = CardZone.HAND if command.target == "hq" else CardZone.DECK
@@ -130,7 +131,7 @@ def resolve_run_command(state: GameState, command, definitions: Mapping[str, Car
                 destination = ZoneLocation(zone=CardZone.SCORE_AREA, player_id=state.runner.player_id)
             state.card_instances[card.instance_id] = card.model_copy(update={
                 "location": destination, "installed": False, "rezzed": False,
-                "face_up": True, "counters": {}, "controller_id": None,
+                "face_up": True, "counters": {}, "controller_id": None, "ability_last_used_turn": {},
             })
             if was_deck:
                 deck = sorted((c for c in state.card_instances.values()
@@ -147,5 +148,17 @@ def resolve_run_command(state: GameState, command, definitions: Mapping[str, Car
                 return
         run.current_card_id = None
         run.phase = "breach"
+    if not candidates(state):
+        end_run(state)
+
+
+def begin_breach(state: GameState) -> None:
+    """Resume success and breach after the last pre-success rez window."""
+    state.run.successful = True
+    state.run.phase = "breach"
+    if state.run.server_id is CentralServer.ARCHIVES:
+        for card in state.card_instances.values():
+            if card.location.zone is CardZone.DISCARD_PILE and card.owner_id == state.corp.player_id:
+                card.face_up = True
     if not candidates(state):
         end_run(state)

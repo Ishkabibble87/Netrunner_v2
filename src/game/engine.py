@@ -29,8 +29,10 @@ from .commands import (
     PurgeVirusCounters,
     RemoveTag,
     ResolveReaction,
+    RezCard,
     RunServer,
     ScoreAgenda,
+    UseCardAbility,
 )
 from .effects import resolve_effect
 from .installation import (
@@ -39,6 +41,12 @@ from .installation import (
     installed_agenda,
     remove_empty_remotes,
     validate_install,
+)
+from .installed_abilities import (
+    resolve_lifecycle,
+    use_ability,
+    validate_ability,
+    validate_rez,
 )
 from .models import (
     CardZone,
@@ -51,7 +59,7 @@ from .models import (
     TurnPhase,
     ZoneLocation,
 )
-from .runs import resolve_run_command, run_actions, unprotected_servers
+from .runs import begin_breach, resolve_run_command, run_actions, unprotected_servers
 from .setup import IllegalCommand, choose_mulligan
 from .turns import advance_turn, hand_cards, maximum_hand_size
 
@@ -79,7 +87,7 @@ def legal_actions_for(
         )
 
     definitions = card_definitions or {}
-    if state.run is not None:
+    if state.run is not None and state.window is None:
         return run_actions(state, definitions) if player.role is PlayerRole.RUNNER else ()
     if state.window is not None:
         if state.window.player is not player.role:
@@ -88,6 +96,14 @@ def legal_actions_for(
             return tuple(ResolveReaction(i) for i in state.window.pending_card_ids)
         actions = []
         for card in state.card_instances.values():
+            try:
+                validate_rez(state, player, card.instance_id, definitions)
+            except IllegalCommand:
+                pass
+            else:
+                actions.append(RezCard(card.instance_id))
+            if state.run is not None or state.turn.active_player is not PlayerRole.CORP or state.turn.phase not in {TurnPhase.DRAW, TurnPhase.ACTION}:
+                continue
             try:
                 _, definition = installed_agenda(state, player, card.instance_id, definitions)
             except IllegalCommand:
@@ -113,8 +129,24 @@ def legal_actions_for(
         return ()
 
     actions: list[GameCommand] = [GainCredit(), DrawCard()]
+    for card in state.card_instances.values():
+        definition = definitions.get(card.definition_id)
+        for ability in definition.action_abilities if definition else ():
+            command = UseCardAbility(card.instance_id, ability.ability_id)
+            try:
+                validate_ability(state, player, command, definitions)
+            except IllegalCommand:
+                continue
+            actions.append(command)
     if player.role is PlayerRole.RUNNER:
         actions.extend(RunServer(server) for server in unprotected_servers(state))
+        for card in hand_cards(state, player):
+            command = InstallCard(card.instance_id)
+            try:
+                validate_install(state, player, command, definitions)
+            except IllegalCommand:
+                continue
+            actions.append(command)
         if player.tags > 0 and player.credits >= 2:
             actions.append(RemoveTag())
     elif player.clicks_remaining >= 3:
@@ -168,7 +200,10 @@ def apply_command(
     if player is None:
         raise IllegalCommand("Player is not part of this game")
     run_commands = (RunServer, ContinueRun, JackOut, AccessCard, FinishAccess)
-    if state.run is not None or isinstance(command, run_commands):
+    if ((state.run is not None and state.window is None)
+            or isinstance(command, run_commands)):
+        if state.window is not None:
+            raise IllegalCommand("Finish the current priority window first")
         if state.winner is not None or player.role is not PlayerRole.RUNNER:
             raise IllegalCommand("Only the Runner can make run decisions")
         if isinstance(command, RunServer):
@@ -182,7 +217,7 @@ def apply_command(
         result.turn.step = "before_action"
         advance_turn(result)
         return GameState.model_validate(result.model_dump())
-    if isinstance(command, (PassPriority, ScoreAgenda, ResolveReaction)):
+    if isinstance(command, (PassPriority, ScoreAgenda, ResolveReaction, RezCard)):
         if state.winner is not None or state.window is None or state.window.player is not player.role:
             raise IllegalCommand("You do not have priority in a window")
         result = state.model_copy(deep=True)
@@ -192,9 +227,18 @@ def apply_command(
             if result.window.kind != "paid":
                 raise IllegalCommand("Resolve mandatory reactions before passing")
             # The opponent currently has no supported options in these windows.
+            continuation = result.window.run_continuation
             result.window = None
+            if continuation == "breach":
+                begin_breach(result)
+        elif isinstance(command, RezCard):
+            card, definition = validate_rez(result, actor, command.card_instance_id, definitions)
+            actor.credits -= definition.rez_cost
+            result.card_instances[card.instance_id] = card.model_copy(update={"face_up": True, "rezzed": True})
+            card = result.card_instances[card.instance_id]
+            resolve_lifecycle(result, actor, card, definition.rez_instructions, definition)
         elif isinstance(command, ScoreAgenda):
-            if (result.window.kind != "paid" or result.turn.active_player is not PlayerRole.CORP
+            if (result.run is not None or result.window.kind != "paid" or result.turn.active_player is not PlayerRole.CORP
                     or result.turn.phase not in {TurnPhase.DRAW, TurnPhase.ACTION}):
                 raise IllegalCommand("Score only during an eligible Corp paid ability window")
             card, definition = installed_agenda(result, actor, command.card_instance_id, definitions)
@@ -244,7 +288,11 @@ def apply_command(
         return GameState.model_validate(result.model_dump())
     _validate_action_window(state, player)
 
-    if isinstance(command, InstallCard):
+    if isinstance(command, UseCardAbility):
+        result = state.model_copy(deep=True)
+        use_ability(result, _player_for_role(result, player.role), command, card_definitions or {})
+        remove_empty_remotes(result)
+    elif isinstance(command, InstallCard):
         result = state.model_copy(deep=True)
         install_card(result, _player_for_role(result, player.role), command, card_definitions or {})
     elif isinstance(command, AdvanceCard):
@@ -336,7 +384,7 @@ def pending_decision(state: GameState) -> PendingDecision | None:
         return None
     if state.setup.pending_player is not None:
         return PendingDecision(player=state.setup.pending_player, type="choose_opening_hand")
-    if state.run is not None:
+    if state.run is not None and state.window is None:
         kind = {"movement": "continue_run", "breach": "choose_access", "access": "resolve_access"}[state.run.phase]
         return PendingDecision(player=PlayerRole.RUNNER, type=kind)
     if state.window is not None:

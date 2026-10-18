@@ -158,9 +158,23 @@ class GameScreen:
                 elif action_type == "install_card" and self.submit_action is not None:
                     card = next((c for c in self.hand if c["instance_id"] == action["card_instance_id"]), None)
                     if card:
-                        target = "new remote" if action["server_id"] == "new_remote" else self._server_label(action["server_id"])
+                        target = ("your rig" if action.get("server_id") is None else
+                                  "new remote" if action["server_id"] == "new_remote" else self._server_label(action["server_id"]))
                         replacement = " · replace existing card" if action.get("trash_card_instance_ids") else ""
-                        choices.append(MenuChoice(f"Install {card['title']} in {target}{replacement}", "action", dict(action)))
+                        cost = self.card_catalog.get(card["definition_id"], {}).get("install_cost")
+                        suffix = f" · {cost} {'credit' if cost == 1 else 'credits'}" if action.get("server_id") is None else ""
+                        choices.append(MenuChoice(f"Install {card['title']} in {target}{replacement} · 1 click{suffix}", "action", dict(action)))
+                elif action_type in {"rez_card", "use_card_ability"} and self.submit_action is not None:
+                    card = next((c["card"] for c in self.state.get("installed_cards", [])
+                                 if c["instance_id"] == action["card_instance_id"] and c.get("card")), {})
+                    title = card.get("title", "card")
+                    if action_type == "rez_card":
+                        cost = self.card_catalog.get(card.get("definition_id"), {}).get("rez_cost", "?")
+                        label = f"Rez {title} · {cost} credits"
+                    else:
+                        ability = card.get("ability_labels", {}).get(action["ability_id"], action["ability_id"])
+                        label = f"{title}: {ability} · 1 click"
+                    choices.append(MenuChoice(label, "action", dict(action)))
                 elif action_type in {"advance_card", "score_agenda", "resolve_reaction"} and self.submit_action is not None:
                     installed = [c["card"] for c in self.state.get("installed_cards", []) if c.get("card")]
                     scored = self.state.get("you", {}).get("score_area", [])
@@ -435,11 +449,11 @@ class GameScreen:
                 if card["server_id"] == self.level.data:
                     title = card["card"]["title"] if card.get("card") else "Facedown card"
                     line(f"{title} · {card['area']} · {card.get('counters', {}).get('advancement', 0)} advancement")
+                    if "credit" in card.get("counters", {}):
+                        line(f"  {card['counters']['credit']} hosted credits")
             line()
         elif self.level.kind == "rig":
-            line("Programs")
-            line("Hardware")
-            line("Resources")
+            line("Installed Runner cards · select a card to read its abilities")
             line()
         elif self.level.kind == "hand" and not self.hand:
             line("Your hand is empty.", "class:muted")
@@ -529,8 +543,17 @@ class GameScreen:
                 label += f" ({card['area']})"
                 if card.get("counters", {}).get("advancement"):
                     label += f" · {card['counters']['advancement']} advancement"
+                if "credit" in card.get("counters", {}):
+                    label += f" · {card['counters']['credit']} hosted credits"
+                if card.get("rezzed"):
+                    label += " · rezzed"
                 labels.append(label)
             rows.append(self._server_label(server) + (": " + ", ".join(labels) if labels else ""))
+        rig = [c for c in self.state.get("installed_cards", []) if c.get("area") == "rig"]
+        for card in rig:
+            title = card["card"]["title"] if card.get("card") else "Facedown card"
+            owner = "Your" if card.get("controller_id") == self.you.get("player_id") else "Opponent's"
+            rows.append(f"{owner} rig: {title} · {card.get('counters', {}).get('credit', 0)} hosted credits")
         return rows
 
     def _status_text(self) -> str:
@@ -690,13 +713,17 @@ class GameScreen:
                 )
             )
         elif choice.kind == "rig":
+            cards = [c for c in self.state.get("installed_cards", []) if c.get("area") == "rig" and c.get("card")]
             self._push(
                 MenuLevel(
                     "Rig",
                     "rig",
-                    [MenuChoice("Back", "back")],
+                    [MenuChoice(f"{c['card']['title']} · {c.get('counters', {}).get('credit', 0)} hosted credits",
+                                "installed_card", c["card"]) for c in cards] + [MenuChoice("Back", "back")],
                 )
             )
+        elif choice.kind == "installed_card":
+            self._push(MenuLevel("Card", "card", data={"cards": [choice.value], "index": 0, "location": "Runner rig"}))
         elif choice.kind == "servers":
             servers = self.state.get("servers", [])
             self._push(

@@ -58,7 +58,7 @@ class RunTests(unittest.TestCase):
         self.assertEqual(revision, self.session.revision)
 
     def runner_turn(self):
-        while self.session.state.turn.active_player is PlayerRole.CORP:
+        while self.session.state.turn.active_player is PlayerRole.CORP or self.session.state.window:
             view = self.view('corp')
             action = next((a for a in view['legal_actions'] if a['type'] == 'pass_priority'), None)
             if action is None:
@@ -71,8 +71,16 @@ class RunTests(unittest.TestCase):
             self.submit('corp', action)
 
     def begin(self, server):
+        self.pass_windows()
         self.submit('runner', {'type': 'run_server', 'server_id': server})
-        return self.submit('runner', {'type': 'continue_run'})
+        self.pass_windows()
+        self.submit('runner', {'type': 'continue_run'})
+        self.pass_windows()
+        return self.view('runner')
+
+    def pass_windows(self):
+        while self.session.state.window:
+            self.submit('corp', {'type': 'pass_priority'})
 
     def access(self, target):
         return self.submit('runner', {'type': 'access_card', 'target': str(target)})
@@ -98,8 +106,9 @@ class RunTests(unittest.TestCase):
             with self.client.websocket_connect(self.path + '/events', headers=self.headers['corp']) as corp:
                 runner.receive_json()
                 corp.receive_json()
+                revision = self.session.revision
                 self.begin(1)
-                for _ in range(2):
+                for _ in range(self.session.revision - revision):
                     runner.receive_json()
                     corp.receive_json()
                 self.reject('corp', {'type': 'continue_run'})
@@ -212,6 +221,7 @@ class RunTests(unittest.TestCase):
         self.reject('runner', {'type': 'run_server', 'server_id': 99})
         self.reject('runner', {'type': 'finish_access'})
         self.submit('runner', {'type': 'run_server', 'server_id': 'rd'})
+        self.pass_windows()
         self.reject('runner', {'type': 'access_card', 'target': 'rd'})
         self.submit('runner', {'type': 'jack_out'})
         self.assertIsNone(self.session.state.run)

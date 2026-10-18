@@ -47,7 +47,27 @@ class LoseClickIfAny(CardContentModel):
     type: Literal["lose_click_if_any"]
 
 
-PlayInstruction = Annotated[GainCredits | DrawCards | LoseClickIfAny, Field(discriminator="type")]
+class LoadCredits(CardContentModel):
+    type: Literal["load_credits"]
+    amount: int = Field(gt=0)
+
+
+class TakeCredits(CardContentModel):
+    type: Literal["take_credits"]
+    amount: int = Field(gt=0)
+
+
+PlayInstruction = Annotated[GainCredits | DrawCards | LoseClickIfAny | LoadCredits | TakeCredits, Field(discriminator="type")]
+
+
+class ActionAbility(CardContentModel):
+    """A named action with a click cost, effects, and optional usage limit."""
+
+    ability_id: str = Field(min_length=1)
+    label: str = Field(min_length=1)
+    click_cost: int = Field(default=1, gt=0)
+    once_per_turn: bool = False
+    instructions: tuple[PlayInstruction, ...]
 
 
 class AuthoredAbilities(CardContentModel):
@@ -55,6 +75,10 @@ class AuthoredAbilities(CardContentModel):
 
     play_instructions: tuple[PlayInstruction, ...] | None = None
     score_instructions: tuple[PlayInstruction, ...] | None = None
+    install_instructions: tuple[PlayInstruction, ...] | None = None
+    rez_instructions: tuple[PlayInstruction, ...] | None = None
+    action_abilities: tuple[ActionAbility, ...] = ()
+    trash_when_empty: bool = False
 
 
 class CardDefinition(CardContentModel):
@@ -75,6 +99,10 @@ class CardDefinition(CardContentModel):
     )
     score_instructions: tuple[PlayInstruction, ...] | None = None
     is_unique: bool = False
+    install_instructions: tuple[PlayInstruction, ...] | None = None
+    rez_instructions: tuple[PlayInstruction, ...] | None = None
+    action_abilities: tuple[ActionAbility, ...] = ()
+    trash_when_empty: bool = False
 
     play_cost: int | None = Field(default=None, ge=0)
     install_cost: int | None = Field(default=None, ge=0)

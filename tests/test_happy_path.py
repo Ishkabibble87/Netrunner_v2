@@ -30,8 +30,10 @@ from game.commands import (
     PlayCard,
     PurgeVirusCounters,
     ResolveReaction,
+    RezCard,
     RunServer,
     ScoreAgenda,
+    UseCardAbility,
 )
 from game.engine import legal_actions_for
 from game.models import (
@@ -42,6 +44,7 @@ from game.models import (
     PlayerRole,
     TurnPhase,
 )
+from game.setup import IllegalCommand
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -65,6 +68,7 @@ class GameProgressTests(unittest.TestCase):
         self.play_economy_cards_and_continue(session)
         self.install_advance_and_score(session)
         self.contest_another_office(session)
+        self.use_installed_economy(session)
 
     def select_and_parse_deck(self) -> DeckSelection:
         deck = load_nrdb_deck(
@@ -259,8 +263,8 @@ class GameProgressTests(unittest.TestCase):
         Corp opens with three Hedge Funds and two Government Subsidies, followed
         by all three Offices. Remaining copies follow in definition-ID order.
         """
-        titles = ["Hedge Fund", "Government Subsidy", "Offworld Office",
-                  "Sure Gamble", "Creative Commission", "VRcation"]
+        titles = ["Hedge Fund", "Government Subsidy", "Offworld Office", "Regolith Mining License",
+                  "Sure Gamble", "Creative Commission", "Telework Contract", "VRcation"]
         codes = [next(code for code, card in self.cards.items() if card.title == title) for title in titles]
         codes += sorted(set(selection.card_counts) - set(codes))
         return [code for code in codes for _ in range(selection.card_counts.get(code, 0))]
@@ -288,6 +292,8 @@ class GameProgressTests(unittest.TestCase):
         self.assertEqual(session.state.corp.clicks_remaining, 0)
         self.assertEqual(session.state.turn.number, 5)
         submit(PassPriority())
+        while session.state.turn.number < 7:
+            submit(PassPriority())
         self.assertEqual(session.state.turn.number, 7)
         self.assertEqual(session.state.turn.phase, TurnPhase.DRAW)
         deck_count = len(self.cards_in_zone(session.state, player_id, CardZone.DECK))
@@ -340,14 +346,24 @@ class GameProgressTests(unittest.TestCase):
             submit(corp, PassPriority())
             submit(corp, AdvanceCard(office.instance_id))
         submit(corp, PassPriority())
+        while session.state.turn.active_player is corp:
+            submit(corp, PassPriority())
         self.assertEqual(session.state.turn.active_player, runner)
         for _ in range(3):
+            while session.state.window:
+                submit(corp, PassPriority())
             submit(runner, GainCredit())
+        while session.state.window:
+            submit(corp, PassPriority())
         credits = session.state.corp.credits
         submit(runner, RunServer(1))
         self.assertEqual(session.state.runner.clicks_remaining, 0)
         self.assertEqual(session.state.turn.active_player, runner)
+        while session.state.window:
+            submit(corp, PassPriority())
         submit(runner, ContinueRun())
+        while session.state.window:
+            submit(corp, PassPriority())
         submit(runner, AccessCard(office.instance_id))
         self.assertTrue(session.state.run.successful)
         self.assertEqual(session.state.run.current_card_id, office.instance_id)
@@ -362,6 +378,122 @@ class GameProgressTests(unittest.TestCase):
         self.assertEqual(stolen.turn.active_player, corp)
         self.assertEqual(len(self.cards_in_zone(stolen, stolen.corp.player_id, CardZone.SCORE_AREA)), 1)
         self.assertEqual(len(self.cards_in_zone(stolen, stolen.runner.player_id, CardZone.SCORE_AREA)), 1)
+
+    def use_installed_economy(self, session):
+        """Continue the same game through both economies and a contested asset."""
+        corp, runner = PlayerRole.CORP, PlayerRole.RUNNER
+
+        def submit(role, command):
+            state = session.state
+            player = state.corp if role is corp else state.runner
+            self.sessions.submit(state.game_id, session.player_tokens[player.player_id], command,
+                                 card_definitions=self.cards)
+            return session.state
+
+        def pass_windows():
+            while session.state.window:
+                submit(session.state.window.player, PassPriority())
+
+        def action_for(role):
+            for _ in range(100):
+                state = session.state
+                if state.window:
+                    submit(state.window.player, PassPriority())
+                elif state.turn.active_player is role and state.turn.phase is TurnPhase.ACTION:
+                    return
+                elif state.turn.phase is TurnPhase.DISCARD:
+                    player = state.corp if state.turn.active_player is corp else state.runner
+                    selection, = legal_actions_for(state, player.player_id, self.cards)
+                    choices = sorted(selection.eligible_card_instance_ids,
+                                     key=lambda i: self.cards[state.card_instances[i].definition_id].title
+                                     in {"Regolith Mining License", "Telework Contract"})
+                    submit(player.role, DiscardCards(tuple(choices[:selection.required_count])))
+                else:
+                    submit(state.turn.active_player, GainCredit())
+            self.fail("Did not reach the requested action window")
+
+        def acquire(role, title):
+            for _ in range(30):
+                action_for(role)
+                player = session.state.corp if role is corp else session.state.runner
+                found = next((c for c in self.cards_in_zone(session.state, player.player_id, CardZone.HAND).values()
+                              if self.cards[c.definition_id].title == title), None)
+                if found:
+                    return found.instance_id
+                submit(role, DrawCard())
+            self.fail(f"Did not draw {title}")
+
+        regolith = acquire(corp, "Regolith Mining License")
+        before = session.state
+        submit(corp, InstallCard(regolith, "new_remote"))
+        self.assertEqual(session.state.corp.credits, before.corp.credits)
+        self.assertEqual(session.state.corp.clicks_remaining, before.corp.clicks_remaining - 1)
+        self.assertEqual(session.state.card_instances[regolith].counters, {})
+        before = session.state
+        submit(corp, RezCard(regolith))
+        self.assertEqual(session.state.corp.credits, before.corp.credits - 2)
+        self.assertEqual(session.state.corp.clicks_remaining, before.corp.clicks_remaining)
+        self.assertEqual(session.state.card_instances[regolith].counters, {"credit": 15})
+        for remaining in (12, 9, 6, 3, 0):
+            action_for(corp)
+            before = session.state
+            command = UseCardAbility(regolith, "take_credits")
+            self.assertIn(command, legal_actions_for(before, before.corp.player_id, self.cards))
+            submit(corp, command)
+            self.assertEqual(session.state.corp.credits, before.corp.credits + 3)
+            card = session.state.card_instances[regolith]
+            self.assertEqual(card.counters.get("credit", 0), remaining)
+        self.assertEqual(card.location.zone, CardZone.DISCARD_PILE)
+        self.assertFalse(card.installed)
+        self.assertEqual(card.counters, {})
+        self.assertNotIn(1, session.state.servers)
+
+        telework = acquire(runner, "Telework Contract")
+        before = session.state
+        submit(runner, InstallCard(telework))
+        self.assertEqual(session.state.runner.credits, before.runner.credits - 1)
+        self.assertEqual(session.state.card_instances[telework].counters, {"credit": 9})
+        self.assertTrue(session.state.card_instances[telework].face_up)
+        self.assertFalse(session.state.card_instances[telework].rezzed)
+        for remaining in (6, 3, 0):
+            action_for(runner)
+            before = session.state
+            command = UseCardAbility(telework, "take_credits")
+            submit(runner, command)
+            self.assertEqual(session.state.runner.credits, before.runner.credits + 3)
+            card = session.state.card_instances[telework]
+            self.assertEqual(card.counters.get("credit", 0), remaining)
+            if remaining:
+                self.assertNotIn(command, legal_actions_for(session.state, before.runner.player_id, self.cards))
+                unchanged = session.state.model_dump()
+                with self.assertRaises(IllegalCommand):
+                    submit(runner, command)
+                self.assertEqual(session.state.model_dump(), unchanged)
+                action_for(corp)
+        self.assertEqual(card.location.zone, CardZone.DISCARD_PILE)
+        self.assertFalse(card.installed)
+        self.assertEqual(card.counters, {})
+
+        # The second copy can be rezzed inside a run and trashed before payout.
+        regolith = acquire(corp, "Regolith Mining License")
+        submit(corp, InstallCard(regolith, "new_remote"))
+        action_for(runner)
+        submit(runner, RunServer(1))
+        self.assertIsNotNone(session.state.window)
+        submit(corp, RezCard(regolith))
+        self.assertEqual(session.state.card_instances[regolith].counters, {"credit": 15})
+        pass_windows()
+        submit(runner, ContinueRun())
+        pass_windows()
+        submit(runner, AccessCard(regolith))
+        before = session.state
+        submit(runner, FinishAccess(trash=True))
+        self.assertEqual(session.state.runner.credits, before.runner.credits - 3)
+        self.assertEqual(session.state.corp.credits, before.corp.credits)
+        self.assertEqual(session.state.card_instances[regolith].counters, {})
+        self.assertFalse(session.state.card_instances[regolith].installed)
+        self.assertNotIn(1, session.state.servers)
+        self.assertIsNone(session.state.run)
 
     @staticmethod
     def cards_in_zone(state, player_id, zone):

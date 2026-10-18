@@ -99,7 +99,11 @@ class CorpScoringTests(unittest.TestCase):
                 self.assertEqual(runner["installed_cards"][0]["counters"], {"advancement": 2})
                 command(PlayerRole.CORP, {"type": "pass_priority"})
                 for _ in range(4):
+                    while self.session.state.window:
+                        command(PlayerRole.CORP, {"type": "pass_priority"})
                     command(PlayerRole.RUNNER, {"type": "gain_credit"})
+                while self.session.state.turn.active_player is PlayerRole.RUNNER:
+                    command(PlayerRole.CORP, {"type": "pass_priority"})
                 # Resume the pre-draw window, then the pre-action window.
                 command(PlayerRole.CORP, {"type": "pass_priority"})
                 command(PlayerRole.CORP, {"type": "pass_priority"})

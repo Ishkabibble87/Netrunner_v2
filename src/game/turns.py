@@ -1,9 +1,8 @@
 """Resume the supported turn steps until an action, discard, or priority decision.
 
 The step is a continuation: completing a scoring/reaction window resumes exactly
-where the turn paused. Windows with no supported choices for either side are
-passed automatically. Rezzing, turn triggers, and regular paid abilities follow
-in later slices; scoring windows stay visible regardless of hidden eligibility.
+where the turn paused. Windows stay visible regardless of hidden eligibility;
+the Runner automatically passes because regular paid abilities are unsupported.
 """
 
 from .card_movement import draw_from_deck
@@ -12,10 +11,10 @@ from .models import (
     GameState,
     PlayerRole,
     PlayerState,
-    PriorityWindow,
     TurnPhase,
     TurnState,
 )
+from .priority import open_paid_window
 
 
 def maximum_hand_size(player: PlayerState) -> int:
@@ -30,17 +29,6 @@ def hand_cards(state: GameState, player: PlayerState):
                  and card.location.player_id == player.player_id)
 
 
-def scoring_window(state: GameState) -> None:
-    """Pause every eligible Corp window if any Corp card is installed.
-
-    Testing scoreability here would reveal the identity of facedown cards.
-    With no installed Corp cards, neither player has a supported window option.
-    """
-    if state.turn.active_player is PlayerRole.CORP and any(
-            c.installed and c.controller_id == state.corp.player_id for c in state.card_instances.values()):
-        state.window = PriorityWindow(kind="paid", player=PlayerRole.CORP)
-
-
 def advance_turn(state: GameState) -> None:
     """Mutate a working snapshot through automatic steps, stopping at a decision."""
     while state.winner is None and state.turn is not None and state.window is None and state.run is None:
@@ -48,7 +36,7 @@ def advance_turn(state: GameState) -> None:
         player = state.corp if turn.active_player is PlayerRole.CORP else state.runner
         if turn.step == "start":
             turn.step = "mandatory_draw" if player.role is PlayerRole.CORP else "before_action"
-            scoring_window(state)  # CR 5.6.1b, before the Corp's mandatory draw.
+            open_paid_window(state)  # CR 5.6.1b / 5.7.1b, before turn-begin steps.
         elif turn.step == "mandatory_draw":
             if not draw_from_deck(state, player.player_id, 1):
                 state.winner = PlayerRole.RUNNER
@@ -57,7 +45,7 @@ def advance_turn(state: GameState) -> None:
             turn.step = "before_action"
         elif turn.step == "before_action":
             turn.step = "action"
-            scoring_window(state)  # CR 5.6.2a, including after the final click.
+            open_paid_window(state)  # CR 5.6.2a / 5.7.1e, including after the final click.
         elif turn.step == "action":
             if player.clicks_remaining > 0:
                 return
@@ -71,6 +59,7 @@ def advance_turn(state: GameState) -> None:
             if len(hand_cards(state, player)) > limit:
                 return
             turn.step = "end"
+            open_paid_window(state)  # CR 5.6.3b / 5.7.2b, after discarding.
         else:
             player.clicks_remaining = 0
             next_role = PlayerRole.RUNNER if player.role is PlayerRole.CORP else PlayerRole.CORP
