@@ -1,4 +1,4 @@
-"""Corp and supported Runner resource installation, scoring, and server cleanup.
+"""Corp and supported Runner installation, scoring, and server cleanup.
 
 Only agendas with authored scoring instructions can be installed in this slice.
 Other Corp permanents can be installed; only authored abilities can be activated.
@@ -48,12 +48,22 @@ def validate_install(state: GameState, player: PlayerState, command: InstallCard
         if (card is None or definition is None or card.owner_id != player.player_id
                 or card.controller_id != player.player_id or card.location.zone is not CardZone.HAND
                 or card.location.player_id != player.player_id or definition.side is not CardSide.RUNNER
-                or definition.card_type is not CardType.RESOURCE or definition.install_instructions is None):
-            raise IllegalCommand("Choose a supported resource from your hand")
-        if command.server_id is not None or command.trash_card_instance_ids:
-            raise IllegalCommand("Runner resources have no server or replacement trash choices")
+                or definition.card_type not in {CardType.RESOURCE, CardType.PROGRAM} or definition.install_instructions is None):
+            raise IllegalCommand("Choose a supported resource or program from your hand")
+        if command.server_id is not None:
+            raise IllegalCommand("Runner cards have no server destination")
+        trash_ids = set(command.trash_card_instance_ids)
+        programs = installed_programs(state, player, definitions)
+        if (len(trash_ids) != len(command.trash_card_instance_ids)
+                or not trash_ids <= {c.instance_id for c in programs}
+                or (trash_ids and definition.card_type is not CardType.PROGRAM)):
+            raise IllegalCommand("Choose distinct programs you control to trash when installing a program")
+        if definition.card_type is CardType.PROGRAM:
+            used = sum(definitions[c.definition_id].memory_cost or 0 for c in programs if c.instance_id not in trash_ids)
+            if used + (definition.memory_cost or 0) > player.memory_limit:
+                raise IllegalCommand("Trash installed programs to make enough memory available")
         if definition.install_cost is None or player.credits < definition.install_cost:
-            raise IllegalCommand("Not enough credits to install this resource")
+            raise IllegalCommand("Not enough credits to install this card")
         return definition, definition.install_cost
     if (player.role is not PlayerRole.CORP or card is None
             or card.owner_id != player.player_id or card.controller_id != player.player_id
@@ -91,6 +101,12 @@ def install_card(state: GameState, player: PlayerState, command: InstallCard,
     """Install on a working copy, keeping a replacement's destination alive."""
     definition, cost = validate_install(state, player, command, definitions)
     if player.role is PlayerRole.RUNNER:
+        for instance_id in command.trash_card_instance_ids:
+            old = state.card_instances[instance_id]
+            state.card_instances[instance_id] = old.model_copy(update={
+                "installed": False, "rezzed": False, "face_up": True, "counters": {},
+                "ability_last_used_turn": {}, "controller_id": None,
+                "location": ZoneLocation(zone=CardZone.DISCARD_PILE, player_id=player.player_id)})
         player.credits -= cost
         player.clicks_remaining -= 1
         card = state.card_instances[command.card_instance_id].model_copy(update={
@@ -140,3 +156,10 @@ def agenda_points(state: GameState, player: PlayerState, definitions: Mapping[st
     """Derive the score from agendas actually present in the player's score area."""
     return sum(definitions[c.definition_id].agenda_points or 0 for c in state.card_instances.values()
                if c.location.zone is CardZone.SCORE_AREA and c.location.player_id == player.player_id)
+
+
+def installed_programs(state, player, definitions):
+    """Programs claim memory while installed; trashing releases it (CR 3.9.3)."""
+    return [c for c in state.card_instances.values() if c.installed
+            and c.controller_id == player.player_id
+            and definitions[c.definition_id].card_type is CardType.PROGRAM]

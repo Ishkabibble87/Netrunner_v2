@@ -36,27 +36,82 @@
     }
   ],
   "30071": {
-    "rez_instructions": [{"type": "load_credits", "amount": 15}],
+    "rez_instructions": [
+      {
+        "type": "load_credits",
+        "amount": 15
+      }
+    ],
     "trash_when_empty": true,
-    "action_abilities": [{
-      "ability_id": "take_credits", "label": "Take 3 hosted credits",
-      "instructions": [{"type": "take_credits", "amount": 3}]
-    }]
+    "action_abilities": [
+      {
+        "ability_id": "take_credits",
+        "label": "Take 3 hosted credits",
+        "instructions": [
+          {
+            "type": "take_credits",
+            "amount": 3
+          }
+        ]
+      }
+    ]
   },
   "30027": {
-    "install_instructions": [{"type": "load_credits", "amount": 9}],
+    "install_instructions": [
+      {
+        "type": "load_credits",
+        "amount": 9
+      }
+    ],
     "trash_when_empty": true,
-    "action_abilities": [{
-      "ability_id": "take_credits", "label": "Take 3 hosted credits (once per turn)",
-      "once_per_turn": true,
-      "instructions": [{"type": "take_credits", "amount": 3}]
-    }]
+    "action_abilities": [
+      {
+        "ability_id": "take_credits",
+        "label": "Take 3 hosted credits (once per turn)",
+        "once_per_turn": true,
+        "instructions": [
+          {
+            "type": "take_credits",
+            "amount": 3
+          }
+        ]
+      }
+    ]
   },
   "30067": {
     "score_instructions": [
       {
         "type": "gain_credits",
         "amount": 7
+      }
+    ]
+  },
+  "30072": {
+    "rez_instructions": [],
+    "subroutines": [
+      {
+        "type": "end_run"
+      }
+    ],
+    "remote_strength_bonus": 2
+  },
+  "30006": {
+    "install_instructions": [],
+    "paid_abilities": [
+      {
+        "ability_id": "break_barrier",
+        "label": "Break up to 2 barrier subroutines \u00b7 1 credit",
+        "type": "break_subroutines",
+        "credit_cost": 1,
+        "amount": 2,
+        "subtype": "Barrier"
+      },
+      {
+        "ability_id": "boost_strength",
+        "label": "+1 strength this encounter \u00b7 2 credits",
+        "type": "boost_strength",
+        "credit_cost": 2,
+        "amount": 1
       }
     ]
   }

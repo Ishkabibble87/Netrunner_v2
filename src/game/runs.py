@@ -1,8 +1,7 @@
-"""Resolve unprotected runs, breaches, and basic access interactions (CR 6–7).
+"""Resolve runs through authored ice encounters, breaches, and access (CR 6–7).
 
-Unsupported paid abilities and reactions auto-pass, as in turn progression.
-Access abilities authored on cards, ice encounters, and modified access limits
-are later slices. Printed rules text is never interpreted here.
+Each run window carries its continuation so passing resumes the exact timing
+step. Access abilities and modified access limits remain later slices.
 """
 
 from collections.abc import Mapping
@@ -25,11 +24,9 @@ from .priority import open_paid_window
 from .setup import IllegalCommand
 
 
-def unprotected_servers(state: GameState):
+def runnable_servers(state: GameState):
     """Offer targets using public ice positions, never hidden identities."""
-    protected = {c.location.server.server_id for c in state.card_instances.values()
-                 if c.installed and c.location.server and c.location.server.area is ServerArea.ICE}
-    return tuple(s for s in state.servers if s not in protected)
+    return tuple(state.servers)
 
 
 def candidates(state: GameState) -> tuple[AccessCard, ...]:
@@ -72,6 +69,7 @@ def run_actions(state: GameState, definitions: Mapping[str, CardDefinition]):
 
 def end_run(state: GameState) -> None:
     """Discard the run fund and visibility, then clean up emptied remote rows."""
+    state.window = None
     state.run = None
     remove_empty_remotes(state)
 
@@ -79,12 +77,18 @@ def end_run(state: GameState) -> None:
 def resolve_run_command(state: GameState, command, definitions: Mapping[str, CardDefinition]) -> None:
     """Mutate a working snapshot after validation; the engine resumes the turn."""
     if isinstance(command, RunServer):
-        if command.server_id not in unprotected_servers(state):
-            raise IllegalCommand("Choose an existing unprotected server; ice encounters are not supported yet")
+        if command.server_id not in runnable_servers(state):
+            raise IllegalCommand("Choose an existing server")
         state.runner.clicks_remaining -= 1
         state.run = RunState(server_id=command.server_id,
                              bad_publicity_credits=state.corp.bad_publicity)
-        open_paid_window(state, "movement")  # CR 6.9.1e, before the jack-out choice.
+        ice = sorted((c for c in state.card_instances.values() if c.installed and c.location.server
+                      and c.location.server.server_id == command.server_id
+                      and c.location.server.area is ServerArea.ICE),
+                     key=lambda c: c.location.server.ice_distance_from_server, reverse=True)
+        state.run.remaining_ice_ids = [c.instance_id for c in ice]
+        state.run.phase = "initiation"
+        run_window(state, "approach", definitions)  # CR 6.9.1e.
         return
     run = state.run
     if command not in run_actions(state, definitions):
@@ -93,10 +97,7 @@ def resolve_run_command(state: GameState, command, definitions: Mapping[str, Car
         end_run(state)
         return
     if isinstance(command, ContinueRun):
-        open_paid_window(state, "breach")  # CR 6.9.4e, after declining to jack out.
-        if state.window is not None:
-            return
-        begin_breach(state)
+        run_window(state, "approach_next", definitions)  # CR 6.9.4e.
         return
     elif isinstance(command, AccessCard):
         if command.target in {"hq", "rd"}:
@@ -162,3 +163,51 @@ def begin_breach(state: GameState) -> None:
                 card.face_up = True
     if not candidates(state):
         end_run(state)
+
+
+def run_window(state, continuation, definitions, *, rez_allowed=True):
+    """Suspend a run, or immediately resume after automatic passes."""
+    open_paid_window(state, continuation, definitions, rez_allowed=rez_allowed)
+    if state.window is None:
+        resume_run(state, continuation, definitions)
+
+
+def resume_run(state, continuation, definitions):
+    """Advance approach, encounter, movement, and success (CR 6.9)."""
+    run = state.run
+    if continuation in {"approach", "approach_next"}:
+        if run.remaining_ice_ids:
+            run.current_ice_id = run.remaining_ice_ids.pop(0)
+            run.phase = "approach"
+            run_window(state, "encounter", definitions)
+        elif continuation == "approach":
+            enter_movement(state, definitions)
+        else:
+            begin_breach(state)
+    elif continuation == "encounter":
+        ice = state.card_instances[run.current_ice_id]
+        if ice.rezzed:
+            run.phase = "encounter"
+            run.broken_subroutine_indices = []
+            run.strength_boosts = {}
+            run_window(state, "resolve_subroutines", definitions, rez_allowed=False)
+        else:
+            enter_movement(state, definitions)
+    elif continuation == "resolve_subroutines":
+        definition = definitions[state.card_instances[run.current_ice_id].definition_id]
+        for index, subroutine in enumerate(definition.subroutines or ()):
+            if index not in run.broken_subroutine_indices and subroutine.type == "end_run":
+                end_run(state)
+                return
+        enter_movement(state, definitions)
+    elif continuation == "breach":
+        begin_breach(state)
+
+
+def enter_movement(state, definitions):
+    """Pass ice, expire encounter effects, then offer the jack-out decision."""
+    state.run.phase = "movement"
+    state.run.current_ice_id = None
+    state.run.strength_boosts = {}
+    state.run.broken_subroutine_indices = []
+    run_window(state, "movement", definitions, rez_allowed=False)  # CR 6.9.4b.

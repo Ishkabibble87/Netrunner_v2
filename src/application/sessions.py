@@ -16,6 +16,7 @@ from game.commands import (
     GameCommand,
     PassPriority,
     ResolveReaction,
+    RezCard,
 )
 from game.engine import apply_command, legal_actions_for
 from game.models import GameState, MulliganDecision, PlayerRole
@@ -35,11 +36,12 @@ def advance_ai_setup(state: GameState, ai_player_ids: set[UUID]) -> GameState:
     return state
 
 
-def advance_ai_decisions(state: GameState, ai_player_ids: set[UUID]) -> GameState:
+def advance_ai_decisions(state: GameState, ai_player_ids: set[UUID], card_definitions=None) -> GameState:
     """Run the training policy until a human decision or game end.
 
     The opponent keeps its opening hand, gains credits, and discards the first
-    eligible excess cards. Every choice goes through the authoritative engine.
+    eligible excess cards. During a run the Corp rezzes affordable supported
+    cards. Every choice goes through the authoritative engine.
     """
     state = advance_ai_setup(state, ai_player_ids)
     while state.winner is None and state.turn is not None:
@@ -47,13 +49,15 @@ def advance_ai_decisions(state: GameState, ai_player_ids: set[UUID]) -> GameStat
         player = state.corp if role is PlayerRole.CORP else state.runner
         if player.player_id not in ai_player_ids:
             break
-        actions = legal_actions_for(state, player.player_id)
+        actions = legal_actions_for(state, player.player_id, card_definitions)
         if not actions:
             break
         selection = next((a for a in actions if isinstance(a, DiscardSelection)), None)
         command = (DiscardCards(selection.eligible_card_instance_ids[:selection.required_count])
                    if selection else next((a for a in actions if isinstance(a, (ResolveReaction, PassPriority))), GainCredit()))
-        state = apply_command(state, player.player_id, command)
+        if state.run is not None:
+            command = next((a for a in actions if isinstance(a, RezCard)), command)
+        state = apply_command(state, player.player_id, command, card_definitions)
     return state
 
 
@@ -184,7 +188,7 @@ class SessionStore:
         with self._lock:
             session, player_id = self._authenticated(game_id, token)
             state = apply_command(session.state, player_id, command, card_definitions)
-            session.state = advance_ai_decisions(state, session.ai_player_ids)
+            session.state = advance_ai_decisions(state, session.ai_player_ids, card_definitions)
             session.revision += 1
             return session, player_id
 

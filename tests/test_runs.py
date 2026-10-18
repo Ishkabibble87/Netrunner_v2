@@ -217,7 +217,6 @@ class RunTests(unittest.TestCase):
         self.install('Palisade', 'hq')
         self.reject('corp', {'type': 'run_server', 'server_id': 'rd'})
         self.runner_turn()
-        self.reject('runner', {'type': 'run_server', 'server_id': 'hq'})
         self.reject('runner', {'type': 'run_server', 'server_id': 99})
         self.reject('runner', {'type': 'finish_access'})
         self.submit('runner', {'type': 'run_server', 'server_id': 'rd'})

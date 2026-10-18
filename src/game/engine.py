@@ -5,6 +5,7 @@ display legal actions, but every submitted command is validated again here.
 """
 
 from collections.abc import Mapping
+from itertools import combinations
 from uuid import UUID
 
 from content.cards.models import CardDefinition
@@ -35,10 +36,12 @@ from .commands import (
     UseCardAbility,
 )
 from .effects import resolve_effect
+from .icebreakers import paid_actions, use_paid_ability
 from .installation import (
     agenda_points,
     install_card,
     installed_agenda,
+    installed_programs,
     remove_empty_remotes,
     validate_install,
 )
@@ -59,7 +62,8 @@ from .models import (
     TurnPhase,
     ZoneLocation,
 )
-from .runs import begin_breach, resolve_run_command, run_actions, unprotected_servers
+from .priority import pass_priority
+from .runs import resolve_run_command, resume_run, run_actions, runnable_servers
 from .setup import IllegalCommand, choose_mulligan
 from .turns import advance_turn, hand_cards, maximum_hand_size
 
@@ -94,7 +98,7 @@ def legal_actions_for(
             return ()
         if state.window.kind == "reaction":
             return tuple(ResolveReaction(i) for i in state.window.pending_card_ids)
-        actions = []
+        actions = paid_actions(state, player, definitions)
         for card in state.card_instances.values():
             try:
                 validate_rez(state, player, card.instance_id, definitions)
@@ -139,14 +143,19 @@ def legal_actions_for(
                 continue
             actions.append(command)
     if player.role is PlayerRole.RUNNER:
-        actions.extend(RunServer(server) for server in unprotected_servers(state))
+        actions.extend(RunServer(server) for server in runnable_servers(state))
         for card in hand_cards(state, player):
-            command = InstallCard(card.instance_id)
-            try:
-                validate_install(state, player, command, definitions)
-            except IllegalCommand:
-                continue
-            actions.append(command)
+            programs = installed_programs(state, player, definitions)
+            # At most a handful of programs fit in base memory. Offer explicit
+            # replacement choices through the existing installation command.
+            for count in range(len(programs) + 1):
+                for trash in combinations(programs, count):
+                    command = InstallCard(card.instance_id, trash_card_instance_ids=tuple(c.instance_id for c in trash))
+                    try:
+                        validate_install(state, player, command, definitions)
+                    except IllegalCommand:
+                        continue
+                    actions.append(command)
         if player.tags > 0 and player.credits >= 2:
             actions.append(RemoveTag())
     elif player.clicks_remaining >= 3:
@@ -215,22 +224,24 @@ def apply_command(
         result = state.model_copy(deep=True)
         resolve_run_command(result, command, card_definitions or {})
         result.turn.step = "before_action"
-        advance_turn(result)
+        advance_turn(result, card_definitions)
         return GameState.model_validate(result.model_dump())
-    if isinstance(command, (PassPriority, ScoreAgenda, ResolveReaction, RezCard)):
+    if isinstance(command, (PassPriority, ScoreAgenda, ResolveReaction, RezCard)) or (state.window is not None and isinstance(command, UseCardAbility)):
         if state.winner is not None or state.window is None or state.window.player is not player.role:
             raise IllegalCommand("You do not have priority in a window")
         result = state.model_copy(deep=True)
         actor = _player_for_role(result, player.role)
         definitions = card_definitions or {}
+        if not isinstance(command, PassPriority) and result.window.kind == "paid":
+            result.window.opponent_passed = False
         if isinstance(command, PassPriority):
             if result.window.kind != "paid":
                 raise IllegalCommand("Resolve mandatory reactions before passing")
-            # The opponent currently has no supported options in these windows.
-            continuation = result.window.run_continuation
-            result.window = None
-            if continuation == "breach":
-                begin_breach(result)
+            continuation = pass_priority(result, definitions)
+            if continuation is not None:
+                resume_run(result, continuation, definitions)
+        elif isinstance(command, UseCardAbility):
+            use_paid_ability(result, actor, command, definitions)
         elif isinstance(command, RezCard):
             card, definition = validate_rez(result, actor, command.card_instance_id, definitions)
             actor.credits -= definition.rez_cost
@@ -266,7 +277,7 @@ def apply_command(
             result.window.pending_card_ids.remove(card.instance_id)
             if not result.window.pending_card_ids:
                 result.window = PriorityWindow(kind="paid", player=PlayerRole.CORP)
-        advance_turn(result)
+        advance_turn(result, card_definitions)
         return GameState.model_validate(result.model_dump())
     if isinstance(command, DiscardCards):
         if (state.winner is not None or state.window is not None or state.setup.pending_player is not None
@@ -284,7 +295,7 @@ def apply_command(
             card = result.card_instances[instance_id]
             card.face_up = player.role is PlayerRole.RUNNER
             card.location = ZoneLocation(zone=CardZone.DISCARD_PILE, player_id=player_id)
-        advance_turn(result)
+        advance_turn(result, card_definitions)
         return GameState.model_validate(result.model_dump())
     _validate_action_window(state, player)
 
@@ -345,7 +356,7 @@ def apply_command(
         raise IllegalCommand("Unsupported command")
 
     result.turn.step = "before_action"
-    advance_turn(result)
+    advance_turn(result, card_definitions)
     return GameState.model_validate(result.model_dump())
 
 

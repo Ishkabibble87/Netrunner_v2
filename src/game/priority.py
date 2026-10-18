@@ -1,22 +1,46 @@
-"""Open supported paid windows without inferring hidden card identities.
+"""Paid priority with active-player first and consecutive passes (CR 9.2.7).
 
-Neither player has regular paid abilities in this slice. The Runner therefore
-passes automatically; the Corp must explicitly decline rez/scoring opportunities
-whenever public board state could permit them (CR 9.2.7).
+Unsupported options pass automatically. Corp opportunities depend on public
+installation/face status, never the identity or affordability of hidden cards.
+Run continuations preserve the timing step suspended by each window.
 """
-
-from typing import Literal
 
 from .models import GameState, PlayerRole, PriorityWindow, TurnPhase
 
 
-def open_paid_window(state: GameState,
-                     run_continuation: Literal["movement", "breach"] | None = None) -> None:
-    """Pause for Corp priority using only public installation and face status."""
+def has_window_options(state: GameState, role: PlayerRole, definitions) -> bool:
+    """Check public potential, so passing cannot reveal hidden eligibility."""
+    player = state.corp if role is PlayerRole.CORP else state.runner
     installed = [c for c in state.card_instances.values()
-                 if c.installed and c.controller_id == state.corp.player_id]
+                 if c.installed and c.controller_id == player.player_id]
+    if any(c.face_up and definitions.get(c.definition_id)
+           and definitions[c.definition_id].paid_abilities for c in installed):
+        return True
+    if role is PlayerRole.RUNNER:
+        return False
     can_score = (state.run is None and state.turn.active_player is PlayerRole.CORP
                  and state.turn.phase in {TurnPhase.DRAW, TurnPhase.ACTION})
-    if any(not c.face_up for c in installed) or (can_score and installed):
-        state.window = PriorityWindow(kind="paid", player=PlayerRole.CORP,
-                                      run_continuation=run_continuation)
+    return bool((can_score and installed) or
+                (state.window.rez_allowed and any(not c.face_up for c in installed)))
+
+
+def open_paid_window(state: GameState, run_continuation=None, definitions=None,
+                     *, rez_allowed: bool = True) -> None:
+    """Open a window, automatically passing players with no supported options."""
+    state.window = PriorityWindow(kind="paid", player=state.turn.active_player,
+                                  run_continuation=run_continuation, rez_allowed=rez_allowed)
+    if not has_window_options(state, state.window.player, definitions or {}):
+        pass_priority(state, definitions or {})
+
+
+def pass_priority(state: GameState, definitions) -> str | None:
+    """Exchange priority, or close after consecutive explicit/automatic passes."""
+    window = state.window
+    other = PlayerRole.RUNNER if window.player is PlayerRole.CORP else PlayerRole.CORP
+    if window.opponent_passed or not has_window_options(state, other, definitions):
+        continuation = window.run_continuation
+        state.window = None
+        return continuation
+    window.player = other
+    window.opponent_passed = True
+    return None
