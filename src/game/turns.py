@@ -43,7 +43,7 @@ def scoring_window(state: GameState) -> None:
 
 def advance_turn(state: GameState) -> None:
     """Mutate a working snapshot through automatic steps, stopping at a decision."""
-    while state.winner is None and state.turn is not None and state.window is None:
+    while state.winner is None and state.turn is not None and state.window is None and state.run is None:
         turn = state.turn
         player = state.corp if turn.active_player is PlayerRole.CORP else state.runner
         if turn.step == "start":
