@@ -57,7 +57,17 @@ class TakeCredits(CardContentModel):
     amount: int = Field(gt=0)
 
 
-PlayInstruction = Annotated[GainCredits | DrawCards | LoseClickIfAny | LoadCredits | TakeCredits, Field(discriminator="type")]
+class InitiateRun(CardContentModel):
+    """Run targets and effects scoped to the run created by this event."""
+
+    type: Literal["initiate_run"]
+    servers: tuple[Literal["hq", "rd", "archives"], ...] | None = None
+    successful_draw: int = Field(default=0, ge=0)
+    additional_accesses: int = Field(default=0, ge=0)
+    hosted_credits: int = Field(default=0, ge=0)
+
+
+PlayInstruction = Annotated[GainCredits | DrawCards | LoseClickIfAny | LoadCredits | TakeCredits | InitiateRun, Field(discriminator="type")]
 
 
 class ActionAbility(CardContentModel):

@@ -162,11 +162,12 @@ def legal_actions_for(
         actions.append(PurgeVirusCounters())
     if card_definitions is not None:
         for card in hand_cards(state, player):
-            try:
-                validate_card_play(state, player, card.instance_id, card_definitions)
-            except IllegalCommand:
-                continue
-            actions.append(PlayCard(card.instance_id))
+            for server in (None, *state.servers):
+                try:
+                    validate_card_play(state, player, card.instance_id, card_definitions, server)
+                except IllegalCommand:
+                    continue
+                actions.append(PlayCard(card.instance_id, server))
     if player.role is PlayerRole.CORP:
         for card in state.card_instances.values():
             try:
@@ -318,7 +319,7 @@ def apply_command(
     elif isinstance(command, PlayCard):
         result = state.model_copy(deep=True)
         play_card(result, _player_for_role(result, player.role), command.card_instance_id,
-                  card_definitions if card_definitions is not None else {})
+                  card_definitions if card_definitions is not None else {}, command.server_id)
     elif isinstance(command, GainCredit):
         result = state.model_copy(deep=True)
         _player_for_role(result, player.role).clicks_remaining -= 1

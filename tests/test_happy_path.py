@@ -71,6 +71,7 @@ class GameProgressTests(unittest.TestCase):
         self.contest_another_office(session)
         self.use_installed_economy(session)
         self.break_through_ice(session)
+        self.run_from_events(session)
 
     def select_and_parse_deck(self) -> DeckSelection:
         deck = load_nrdb_deck(
@@ -266,7 +267,7 @@ class GameProgressTests(unittest.TestCase):
         by all three Offices. Remaining copies follow in definition-ID order.
         """
         titles = ["Hedge Fund", "Government Subsidy", "Offworld Office", "Regolith Mining License",
-                  "Sure Gamble", "Creative Commission", "Telework Contract", "VRcation", "Cleaver", "Palisade"]
+                  "Sure Gamble", "Creative Commission", "Telework Contract", "VRcation", "Cleaver", "Palisade", "Jailbreak", "Overclock"]
         codes = [next(code for code, card in self.cards.items() if card.title == title) for title in titles]
         codes += sorted(set(selection.card_counts) - set(codes))
         return [code for code in codes for _ in range(selection.card_counts.get(code, 0))]
@@ -408,7 +409,8 @@ class GameProgressTests(unittest.TestCase):
                     selection, = legal_actions_for(state, player.player_id, self.cards)
                     choices = sorted(selection.eligible_card_instance_ids,
                                      key=lambda i: {"Regolith Mining License": 1, "Telework Contract": 1,
-                                                    "Offworld Office": 3, "Palisade": 2, "Cleaver": 3}.get(
+                                                    "Offworld Office": 3, "Palisade": 2, "Cleaver": 3,
+                                                    "Jailbreak": 3, "Overclock": 3}.get(
                                                         self.cards[state.card_instances[i].definition_id].title, 0))
                     submit(player.role, DiscardCards(tuple(choices[:selection.required_count])))
                 else:
@@ -505,7 +507,7 @@ class GameProgressTests(unittest.TestCase):
                     selection, = legal_actions_for(state, player.player_id, self.cards)
                     choices = sorted(selection.eligible_card_instance_ids,
                                      key=lambda i: self.cards[state.card_instances[i].definition_id].title
-                                     in {"Offworld Office", "Palisade", "Cleaver"})
+                                     in {"Offworld Office", "Palisade", "Cleaver", "Jailbreak", "Overclock"})
                     submit(player.role, DiscardCards(tuple(choices[:selection.required_count])))
                 else:
                     submit(state.turn.active_player, GainCredit())
@@ -572,6 +574,89 @@ class GameProgressTests(unittest.TestCase):
         self.assertFalse(session.state.card_instances[regolith].installed)
         self.assertEqual(session.state.card_instances[regolith].counters, {})
         self.assertIsNone(session.state.run)
+
+    def run_from_events(self, session):
+        """Continue the same game through Jailbreak and an Overclock-funded encounter."""
+        corp, runner = PlayerRole.CORP, PlayerRole.RUNNER
+
+        def submit(role, command):
+            player = session.state.corp if role is corp else session.state.runner
+            self.sessions.submit(session.state.game_id, session.player_tokens[player.player_id], command,
+                                 card_definitions=self.cards)
+
+        def pass_windows():
+            while session.state.window:
+                submit(session.state.window.player, PassPriority())
+
+        def action_for(role):
+            for _ in range(150):
+                pass_windows()
+                state = session.state
+                if state.turn.active_player is role and state.turn.phase is TurnPhase.ACTION:
+                    return
+                if state.turn.phase is TurnPhase.DISCARD:
+                    player = state.corp if state.turn.active_player is corp else state.runner
+                    selection, = legal_actions_for(state, player.player_id, self.cards)
+                    choices = sorted(selection.eligible_card_instance_ids,
+                                     key=lambda i: self.cards[state.card_instances[i].definition_id].title
+                                     in {"Jailbreak", "Overclock"})
+                    submit(player.role, DiscardCards(tuple(choices[:selection.required_count])))
+                else:
+                    submit(state.turn.active_player, GainCredit())
+            self.fail("Did not reach the requested action window")
+
+        def acquire(title):
+            for _ in range(30):
+                action_for(runner)
+                found = next((c for c in self.cards_in_zone(session.state, session.state.runner.player_id,
+                                                          CardZone.HAND).values()
+                              if self.cards[c.definition_id].title == title), None)
+                if found:
+                    return found.instance_id
+                submit(runner, DrawCard())
+            self.fail(f"Did not draw {title}")
+
+        jailbreak = acquire("Jailbreak")
+        before = session.state
+        submit(runner, PlayCard(jailbreak, "rd"))
+        self.assertEqual(session.state.runner.clicks_remaining, before.runner.clicks_remaining - 1)
+        self.assertEqual(session.state.card_instances[jailbreak].location.zone, CardZone.PLAY_AREA)
+        pass_windows()
+        submit(runner, ContinueRun())
+        pass_windows()
+        self.assertEqual(len(self.cards_in_zone(session.state, before.runner.player_id, CardZone.HAND)),
+                         len(self.cards_in_zone(before, before.runner.player_id, CardZone.HAND)))
+        self.assertEqual(session.state.run.access_limit, 2)
+        seen = []
+        for _ in range(2):
+            submit(runner, AccessCard("rd"))
+            seen.append(session.state.run.current_card_id)
+            submit(runner, FinishAccess())
+        self.assertEqual(len(set(seen)), 2)
+        self.assertIsNone(session.state.run)
+        self.assertEqual(session.state.card_instances[jailbreak].location.zone, CardZone.DISCARD_PILE)
+
+        overclock = acquire("Overclock")
+        ice = next(c for c in session.state.card_instances.values()
+                   if c.installed and self.cards[c.definition_id].title == "Palisade")
+        target = ice.location.server.server_id
+        breaker = next(c.instance_id for c in session.state.card_instances.values()
+                       if c.installed and self.cards[c.definition_id].title == "Cleaver")
+        before = session.state.runner.credits
+        submit(runner, PlayCard(overclock, target))
+        self.assertEqual(session.state.runner.credits, before - 1)
+        while session.state.run.phase != "encounter":
+            submit(session.state.window.player, PassPriority())
+        submit(runner, UseCardAbility(breaker, "boost_strength"))
+        submit(runner, UseCardAbility(breaker, "break_barrier", (0,)))
+        self.assertEqual(session.state.runner.credits, before - 1)
+        self.assertEqual(session.state.card_instances[overclock].counters, {"credit": 2})
+        pass_windows()
+        submit(runner, ContinueRun())
+        pass_windows()
+        self.assertIsNone(session.state.run)
+        self.assertEqual(session.state.card_instances[overclock].location.zone, CardZone.DISCARD_PILE)
+        self.assertEqual(session.state.card_instances[overclock].counters, {})
 
     @staticmethod
     def cards_in_zone(state, player_id, zone):

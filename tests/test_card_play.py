@@ -64,7 +64,7 @@ class CardPlayTests(unittest.TestCase):
             with self.client.websocket_connect(f"{self.path}/events", headers=self.headers[PlayerRole.RUNNER]) as runner_socket:
                 corp = corp_socket.receive_json()
                 runner = runner_socket.receive_json()
-                command = {"type": "play_card", "card_instance_id": str(card.instance_id)}
+                command = {"type": "play_card", "card_instance_id": str(card.instance_id), "server_id": None}
                 self.assertIn(command, corp["state"]["legal_actions"])
                 self.assertNotIn(str(card.instance_id), str(runner))
                 response = self.client.post(f"{self.path}/commands", headers=self.headers[PlayerRole.CORP], json=command)

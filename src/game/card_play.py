@@ -1,4 +1,4 @@
-"""Validate and resolve immediate event/operation play using authored definitions.
+"""Validate and resolve event/operation play, including suspended run events.
 
 Common costs and the hand -> play area -> discard lifecycle belong here rather
 than in individual cards. More complex future cards can add explicit handlers
@@ -8,15 +8,17 @@ without duplicating the common lifecycle or introducing API-specific rules.
 from collections.abc import Mapping
 from uuid import UUID
 
-from content.cards.models import CardDefinition, CardType
+from content.cards.models import CardDefinition, CardType, InitiateRun
 
 from .effects import resolve_effect
-from .models import CardZone, GameState, PlayerRole, PlayerState, ZoneLocation
+from .models import CardZone, GameState, PlayerRole, PlayerState, ServerId, ZoneLocation
+from .runs import start_run
 from .setup import IllegalCommand
 
 
 def validate_card_play(state: GameState, player: PlayerState, instance_id: UUID,
-                       definitions: Mapping[str, CardDefinition]) -> CardDefinition:
+                       definitions: Mapping[str, CardDefinition],
+                       server_id: ServerId | None = None) -> CardDefinition:
     """Validate card-specific legality; the caller validates the action window."""
     card = state.card_instances.get(instance_id)
     if (card is None or card.owner_id != player.player_id
@@ -33,19 +35,35 @@ def validate_card_play(state: GameState, player: PlayerState, instance_id: UUID,
         raise IllegalCommand("This card's play ability is not implemented")
     if player.credits < definition.play_cost:
         raise IllegalCommand(f"Playing {definition.title} costs {definition.play_cost} credits")
+    run = next((i for i in definition.play_instructions if isinstance(i, InitiateRun)), None)
+    if run:
+        if definition.play_instructions[-1] is not run or sum(isinstance(i, InitiateRun) for i in definition.play_instructions) != 1:
+            raise IllegalCommand("Supported run events must finish with a single run instruction")
+        if (player.role is not PlayerRole.RUNNER or server_id not in state.servers
+                or (run.servers is not None and server_id not in run.servers)):
+            raise IllegalCommand("Choose a legal server for this run event")
+    elif server_id is not None:
+        raise IllegalCommand("This card does not choose a server")
     return definition
 
 
 def play_card(state: GameState, player: PlayerState, instance_id: UUID,
-              definitions: Mapping[str, CardDefinition]) -> None:
+              definitions: Mapping[str, CardDefinition], server_id: ServerId | None = None) -> None:
     """Pay and resolve one card on a copied snapshot (CR 8.6.7)."""
-    definition = validate_card_play(state, player, instance_id, definitions)
+    definition = validate_card_play(state, player, instance_id, definitions, server_id)
     player.clicks_remaining -= 1
     card = state.card_instances[instance_id]
     card.face_up = True
     card.location = ZoneLocation(zone=CardZone.PLAY_AREA)
     player.credits -= definition.play_cost
     for instruction in definition.play_instructions:
+        if isinstance(instruction, InitiateRun):
+            if instruction.hosted_credits:
+                card.counters["credit"] = instruction.hosted_credits
+            start_run(state, server_id, definitions, source_event_id=instance_id,
+                      successful_draw=instruction.successful_draw,
+                      additional_accesses=instruction.additional_accesses)
+            return
         resolve_effect(state, player, instruction)
         if state.winner is not None:
             return

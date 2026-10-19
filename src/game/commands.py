@@ -41,6 +41,7 @@ class PlayCard:
     """Play one supported event or operation identified by its physical copy."""
 
     card_instance_id: UUID
+    server_id: ServerId | None = None
 
 
 @dataclass(frozen=True)

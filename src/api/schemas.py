@@ -52,6 +52,7 @@ from game.models import (
     PlayerState,
     ServerId,
 )
+from game.payments import event_credits
 from game.turns import maximum_hand_size
 
 
@@ -99,6 +100,7 @@ class PlayCardCommandRequest(ApiModel):
 
     type: Literal["play_card"]
     card_instance_id: UUID
+    server_id: ServerId | None = None
 
 
 class DiscardCardsCommandRequest(ApiModel):
@@ -231,7 +233,7 @@ def game_command_from_request(request: PlayerCommandRequest) -> GameCommand:
     if isinstance(request, FinishAccessCommandRequest):
         return FinishAccess(request.trash)
     if isinstance(request, PlayCardCommandRequest):
-        return PlayCard(request.card_instance_id)
+        return PlayCard(request.card_instance_id, request.server_id)
     if isinstance(request, InstallCardCommandRequest):
         return InstallCard(request.card_instance_id, request.server_id, tuple(request.trash_card_instance_ids))
     if isinstance(request, RezCardCommandRequest):
@@ -274,7 +276,7 @@ def command_request_from_game(command: GameCommand | DiscardSelection) -> LegalA
     if isinstance(command, FinishAccess):
         return FinishAccessCommandRequest(type="finish_access", trash=command.trash)
     if isinstance(command, PlayCard):
-        return PlayCardCommandRequest(type="play_card", card_instance_id=command.card_instance_id)
+        return PlayCardCommandRequest(type="play_card", card_instance_id=command.card_instance_id, server_id=command.server_id)
     if isinstance(command, InstallCard):
         return InstallCardCommandRequest(type="install_card", card_instance_id=command.card_instance_id,
             server_id=command.server_id, trash_card_instance_ids=list(command.trash_card_instance_ids))
@@ -386,6 +388,10 @@ class RunView(ApiModel):
     phase: str
     successful: bool
     bad_publicity_credits: int
+    event_credits: int = 0
+    source_event: CardView | None = None
+    central_access_limit: int = 1
+    central_accesses: int = 0
     current_card: CardView | None
     current_ice_id: UUID | None = None
     current_ice: CardView | None = None
@@ -504,6 +510,10 @@ class InitialGameView(ApiModel):
                     if state.run.current_ice_id and state.card_instances[state.run.current_ice_id].rezzed else [],
                 rez_allowed=bool(state.window and state.window.rez_allowed),
                 bad_publicity_credits=state.run.bad_publicity_credits,
+                event_credits=event_credits(state),
+                source_event=card_view(state.run.source_event_id) if state.run.source_event_id else None,
+                central_access_limit=state.run.access_limit,
+                central_accesses=state.run.central_accesses,
                 current_card=card_view(state.run.current_card_id)
                     if state.run.current_card_id in visible_ids else None,
                 accessed_cards=[card_view(i) for i in dict.fromkeys(state.run.visible_card_ids) if i in visible_ids],
