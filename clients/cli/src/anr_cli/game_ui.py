@@ -211,6 +211,8 @@ class GameScreen:
                     titles = [c["card"]["title"] for c in self.state.get("installed_cards", [])
                               if c["instance_id"] in action["card_instance_ids"] and c.get("card")]
                     choices.append(MenuChoice("Trash " + ", ".join(titles) + " to free memory", "action", dict(action)))
+                elif action_type == "select_effect_cards" and self.submit_action is not None:
+                    choices.append(MenuChoice(f"Choose {action['required_count']} cards", "discard", action))
                 elif action_type == "discard_cards" and self.submit_action is not None:
                     choices.append(MenuChoice(f"Discard {action['required_count']} cards", "discard", action))
                 elif self.submit_action is not None:
@@ -633,9 +635,9 @@ class GameScreen:
         if (self.state.get("run") or {}).get("phase") == "subroutine_choice":
             return "Jack out or continue resolving subroutines" if self.viewer_role == "runner" else "Runner may jack out"
         decision = self.state.get("decision") or {}
-        if decision.get("type") == "choose_effect":
+        if decision.get("type") in {"choose_effect", "choose_cards"}:
             who = "You" if decision["player"] == self.viewer_role else str(decision["player"]).title()
-            return f"{who}: choose an effect"
+            return f"{who}: " + ("choose cards" if decision["type"] == "choose_cards" else "choose an effect")
         if decision.get("type") in {"paid_ability_window", "resolve_reaction"}:
             who = "You" if decision["player"] == self.viewer_role else str(decision["player"]).title()
             return f"{who}: " + ("paid ability window · act or pass" if decision["type"] == "paid_ability_window" else "resolve reaction")
@@ -671,18 +673,32 @@ class GameScreen:
                     labels.append(str(card.get("title", "Card")))
         return " / ".join(labels)
 
+    def _selection_card_label(self, card: dict[str, Any]) -> str:
+        """Distinguish installed targets by their public location and counters."""
+        installed = next((c for c in self.state.get("installed_cards", [])
+                          if c["instance_id"] == card["instance_id"]), None)
+        if installed is None:
+            return card["title"]
+        location = self._server_label(installed["server_id"]) if installed.get("server_id") is not None else "rig"
+        return f"{card['title']} · {location}{self._installed_details(installed)}"
+
     def _refresh_discard_choices(self) -> None:
         """Collect a local selection and send it as one simultaneous discard."""
         data = self.level.data
         selected = data["selected"]
         eligible = data["action"]["eligible_card_instance_ids"]
+        cards = self.state.get("selection_cards", []) if data["action"]["type"] == "select_effect_cards" else self.hand
         self.level.choices = [MenuChoice(
-            f"{'[x]' if card['instance_id'] in selected else '[ ]'} {card['title']}",
+            f"{'[x]' if card['instance_id'] in selected else '[ ]'} {self._selection_card_label(card)}",
             "toggle_discard", card["instance_id"],
-        ) for card in self.hand if card["instance_id"] in eligible]
+        ) for card in cards if card["instance_id"] in eligible]
         if len(selected) == data["action"]["required_count"]:
-            self.level.choices.append(MenuChoice("Confirm discard", "action", {
-                "type": "discard_cards", "card_instance_ids": list(selected),
+            self.level.choices.append(MenuChoice("Confirm selection", "action", {
+                "type": data["action"]["type"], "card_instance_ids": list(selected),
+            }))
+        if data["action"].get("optional"):
+            self.level.choices.append(MenuChoice("Decline", "action", {
+                "type": data["action"]["type"], "card_instance_ids": [],
             }))
         self.level.choices.append(MenuChoice("Back", "back"))
         self._invalidate()
@@ -732,7 +748,7 @@ class GameScreen:
                 self.update_state(state)
             self._invalidate()
         elif choice.kind == "discard":
-            self._push(MenuLevel("Choose cards to discard", "discard", data={
+            self._push(MenuLevel("Choose cards", "discard", data={
                 "action": choice.value, "selected": [],
             }))
             self._refresh_discard_choices()

@@ -125,19 +125,43 @@ class EndRunEffect(CardContentModel):
     type: Literal["end_run"] = "end_run"
 
 
+class SelectCards(CardContentModel):
+    """Choose a set at resolution time; effect targets allow partial resolution."""
+
+    type: Literal["select_cards"] = "select_cards"
+    player: Literal["corp", "runner"]
+    zone: Literal["hand", "installed"]
+    side: Literal["corp", "runner", "any"]
+    card_types: tuple[CardType, ...] = ()
+    count: int = Field(default=1, gt=0)
+    effect: Literal["trash", "place_advancement"] = "trash"
+    amount: int = Field(default=2, gt=0)
+    not_installed_this_turn: bool = False
+    optional: bool = False
+
+
+class TrashAccessed(CardContentModel):
+    type: Literal["trash_accessed"] = "trash_accessed"
+
+
 class EffectOption(CardContentModel):
-    """A Task 7 decision branch; broader modes and targets belong to Task 8."""
+    """A mode or payment branch, with full costs validated before payment."""
 
     option_id: str = Field(min_length=1)
     label: str = Field(min_length=1)
     credit_cost: int = Field(default=0, ge=0)
-    instructions: tuple[Annotated[GiveTags | EndRunEffect | GainCredits | DrawCards, Field(discriminator="type")], ...] = ()
+    click_cost: int = Field(default=0, ge=0)
+    trash_hand_cost: int = Field(default=0, ge=0)
+    instructions: tuple["PlayInstruction", ...] = ()
 
 
 class ChooseEffect(CardContentModel):
+    """The chooser need not be the controller who receives a mode's effects."""
+
     type: Literal["choose_effect"] = "choose_effect"
     player: Literal["corp", "runner"]
     options: tuple[EffectOption, ...] = Field(min_length=2)
+    repeat_if_tagged: bool = False
 
 
 class TaggedDamage(CardContentModel):
@@ -147,7 +171,7 @@ class TaggedDamage(CardContentModel):
     amount: int = Field(gt=0)
 
 
-PlayInstruction = Annotated[GiveTags | ChooseEffect | EndRunEffect | DealDamage | TaggedDamage | PlaceVirusCounters | DerezHost | GainCreditsPerVirus | GainCredits | GainAccessCredits | AdditionalAccesses | DrawCards | LoseClickIfAny | LoadCredits | TakeCredits | InitiateRun | TrashSource, Field(discriminator="type")]
+PlayInstruction = Annotated[SelectCards | TrashAccessed | GiveTags | ChooseEffect | EndRunEffect | DealDamage | TaggedDamage | PlaceVirusCounters | DerezHost | GainCreditsPerVirus | GainCredits | GainAccessCredits | AdditionalAccesses | DrawCards | LoseClickIfAny | LoadCredits | TakeCredits | InitiateRun | TrashSource, Field(discriminator="type")]
 
 
 class TriggeredAbility(CardContentModel):
@@ -155,9 +179,9 @@ class TriggeredAbility(CardContentModel):
 
     ability_id: str = Field(min_length=1)
     label: str = Field(min_length=1)
-    trigger: Literal["turn_begin", "turn_end", "discard_end", "action", "advance", "install", "rez", "score", "steal", "encounter", "take_tags", "empty", "run_success", "breach", "access_trash", "run_end", "access"]
+    trigger: Literal["turn_begin", "turn_end", "discard_end", "action", "advance", "install", "rez", "score", "steal", "encounter", "approach_server", "take_tags", "empty", "run_success", "breach", "access_trash", "run_end", "access", "mid_access"]
     scope: Literal["controller", "self", "any"] = "controller"
-    condition: Literal["previously_unadvanced", "facedown_archives", "installed_virus", "successful_run", "run_on_source_server", "agenda_stolen_here"] | None = None
+    condition: Literal["previously_unadvanced", "facedown_archives", "installed_virus", "successful_run", "run_on_source_server", "agenda_stolen_here", "accessed_outside_archives"] | None = None
     persistent: bool = False
     servers: tuple[Literal["hq", "rd", "archives"], ...] | None = None
     optional: bool = False
@@ -286,3 +310,8 @@ class CardDefinition(CardContentModel):
 
     flavor_text: str | None = None
     illustrator: str | None = None
+
+
+# Resolve the recursive instruction tree through models, never printed prose.
+EffectOption.model_rebuild()
+ChooseEffect.model_rebuild()

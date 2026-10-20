@@ -160,10 +160,26 @@ class ChooseEffectOption:
 
 
 @dataclass(frozen=True)
+class SelectEffectCards:
+    """Submit all targets or hand-trash payments as one validated selection."""
+
+    card_instance_ids: tuple[UUID, ...]
+
+
+@dataclass(frozen=True)
+class CardSelection:
+    """Private target descriptor without enumerating combinations."""
+
+    eligible_card_instance_ids: tuple[UUID, ...]
+    required_count: int
+    optional: bool = False
+
+
+@dataclass(frozen=True)
 class TrashResource:
     """Spend one Corp click and two credits to trash a tagged Runner's resource."""
 
     card_instance_id: UUID
 
 
-GameCommand = ChooseEffectOption | TrashResource | TrashPrograms | RezCard | UseCardAbility | RunServer | ContinueRun | JackOut | AccessCard | FinishAccess | InstallCard | AdvanceCard | ScoreAgenda | PassPriority | ResolveReaction | ChooseMulligan | GainCredit | DrawCard | RemoveTag | PurgeVirusCounters | DiscardCards | PlayCard
+GameCommand = SelectEffectCards | ChooseEffectOption | TrashResource | TrashPrograms | RezCard | UseCardAbility | RunServer | ContinueRun | JackOut | AccessCard | FinishAccess | InstallCard | AdvanceCard | ScoreAgenda | PassPriority | ResolveReaction | ChooseMulligan | GainCredit | DrawCard | RemoveTag | PurgeVirusCounters | DiscardCards | PlayCard

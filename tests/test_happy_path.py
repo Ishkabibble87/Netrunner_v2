@@ -111,7 +111,7 @@ class GameProgressTests(unittest.TestCase):
         selections[PlayerRole.CORP] = deck
         runner_deck = selections[PlayerRole.RUNNER]
         selections[PlayerRole.RUNNER] = runner_deck.model_copy(update={
-            "card_counts": {**runner_deck.card_counts, "30009": 1, "30004": 1, "30007": 1}})
+            "card_counts": {**runner_deck.card_counts, "30009": 1, "30004": 1, "30007": 1, "30002": 1}})
         opponent = opponent.model_copy(update={"deck_selections": selections})
         player_id = uuid4()
         game = create_ai_game(
@@ -288,7 +288,7 @@ class GameProgressTests(unittest.TestCase):
         titles = ["Hedge Fund", "Government Subsidy", "Offworld Office", "Regolith Mining License",
                   "Sure Gamble", "Creative Commission", "Telework Contract", "VRcation", "Cleaver", "Palisade", "Jailbreak", "Overclock", "Docklands Pass", "Red Team", "Pennyshaver"]
         codes = [next(code for code, card in self.cards.items() if card.title == title) for title in titles]
-        final_cards = ["30009", "30004", "30007", "30032"]
+        final_cards = ["30009", "30004", "30007", "30002", "30032"]
         codes += sorted(set(selection.card_counts) - set(codes) - set(final_cards))
         codes += final_cards
         return [code for code in codes for _ in range(selection.card_counts.get(code, 0))]
@@ -893,6 +893,18 @@ class GameProgressTests(unittest.TestCase):
                          if c.installed and c.controller_id == session.state.runner.player_id
                          and self.cards[c.definition_id].card_type.value == "program")
         submit(runner, InstallCard(mayfly, trash_card_instance_ids=programs))
+        settle()
+        # The Corp chooses Wildcat Strike's mode, but the Runner receives it.
+        wildcat = next(c.instance_id for c in self.cards_in_zone(
+            session.state, session.state.runner.player_id, CardZone.HAND).values()
+            if self.cards[c.definition_id].title == "Wildcat Strike")
+        before = session.state.runner.credits
+        submit(runner, PlayCard(wildcat))
+        self.assertEqual(session.state.window.player, PlayerRole.CORP)
+        self.assertEqual(session.state.card_instances[wildcat].location.zone, CardZone.PLAY_AREA)
+        submit(PlayerRole.CORP, ChooseEffectOption("gain_credits"))
+        self.assertEqual(session.state.runner.credits, before - self.cards["30002"].play_cost + 6)
+        self.assertEqual(session.state.card_instances[wildcat].location.zone, CardZone.DISCARD_PILE)
         settle()
         while session.state.runner.credits < 5:
             submit(runner, GainCredit())

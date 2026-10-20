@@ -174,7 +174,40 @@
   },
   "30003": {
     "install_instructions": [],
-    "memory_bonus": 1
+    "memory_bonus": 1,
+    "triggered_abilities": [
+      {
+        "ability_id": "carnivore",
+        "label": "Trash 2 cards from grip to trash the accessed card",
+        "trigger": "mid_access",
+        "instructions": [
+          {
+            "type": "choose_effect",
+            "player": "runner",
+            "options": [
+              {
+                "option_id": "pay",
+                "label": "Trash 2 cards from grip",
+                "instructions": [
+                  {
+                    "type": "trash_accessed"
+                  }
+                ],
+                "trash_hand_cost": 2
+              },
+              {
+                "option_id": "decline",
+                "label": "Continue access",
+                "instructions": []
+              }
+            ]
+          }
+        ],
+        "optional": true,
+        "once_per_turn": true,
+        "condition": "accessed_outside_archives"
+      }
+    ]
   },
   "30014": {
     "install_instructions": [],
@@ -184,7 +217,12 @@
         "ability_id": "successful_run_credit",
         "label": "Place 1 hosted credit",
         "trigger": "run_success",
-        "instructions": [{"type": "load_credits", "amount": 1}]
+        "instructions": [
+          {
+            "type": "load_credits",
+            "amount": 1
+          }
+        ]
       }
     ],
     "action_abilities": [
@@ -192,8 +230,14 @@
         "ability_id": "cash_out",
         "label": "Place 1 credit, then take all hosted credits",
         "instructions": [
-          {"type": "load_credits", "amount": 1},
-          {"type": "take_credits", "amount": "all"}
+          {
+            "type": "load_credits",
+            "amount": 1
+          },
+          {
+            "type": "take_credits",
+            "amount": "all"
+          }
         ]
       }
     ]
@@ -225,7 +269,12 @@
         "trigger": "score",
         "scope": "self",
         "optional": true,
-        "instructions": [{"type": "draw_cards", "amount": 2}]
+        "instructions": [
+          {
+            "type": "draw_cards",
+            "amount": 2
+          }
+        ]
       }
     ]
   },
@@ -1006,6 +1055,196 @@
     ]
   },
   "30065": {
-    "play_requirement": "tagged"
+    "play_requirement": "tagged",
+    "play_instructions": [
+      {
+        "type": "select_cards",
+        "player": "corp",
+        "side": "runner",
+        "zone": "installed",
+        "card_types": [
+          "program",
+          "hardware"
+        ]
+      }
+    ]
+  },
+  "30002": {
+    "play_instructions": [
+      {
+        "type": "choose_effect",
+        "player": "corp",
+        "options": [
+          {
+            "option_id": "gain_credits",
+            "label": "Runner gains 6 credits",
+            "instructions": [
+              {
+                "type": "gain_credits",
+                "amount": 6
+              }
+            ]
+          },
+          {
+            "option_id": "draw_cards",
+            "label": "Runner draws 4 cards",
+            "instructions": [
+              {
+                "type": "draw_cards",
+                "amount": 4
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "30040": {
+    "play_instructions": [
+      {
+        "type": "select_cards",
+        "player": "corp",
+        "side": "any",
+        "zone": "installed",
+        "effect": "place_advancement",
+        "not_installed_this_turn": true
+      }
+    ]
+  },
+  "30042": {
+    "rez_instructions": [],
+    "triggered_abilities": [
+      {
+        "ability_id": "manegarm",
+        "label": "Pay 2 clicks or 5 credits, or end the run",
+        "trigger": "approach_server",
+        "instructions": [
+          {
+            "type": "choose_effect",
+            "player": "runner",
+            "options": [
+              {
+                "option_id": "pay_clicks",
+                "label": "Spend 2 clicks to continue",
+                "instructions": [],
+                "click_cost": 2
+              },
+              {
+                "option_id": "pay_credits",
+                "label": "Pay 5 credits to continue",
+                "instructions": [],
+                "credit_cost": 5
+              },
+              {
+                "option_id": "end_run",
+                "label": "End the run",
+                "instructions": [
+                  {
+                    "type": "end_run"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "scope": "any",
+        "condition": "run_on_source_server"
+      }
+    ]
+  },
+  "30048": {
+    "play_instructions": [
+      {
+        "type": "gain_credits",
+        "amount": 10
+      },
+      {
+        "type": "select_cards",
+        "player": "corp",
+        "side": "corp",
+        "zone": "hand"
+      }
+    ]
+  },
+  "30050": {
+    "rez_instructions": [],
+    "triggered_abilities": [
+      {
+        "ability_id": "anoetic",
+        "label": "Pay 2 credits and trash 2 cards from HQ to end the run",
+        "trigger": "approach_server",
+        "instructions": [
+          {
+            "type": "choose_effect",
+            "player": "corp",
+            "options": [
+              {
+                "option_id": "pay",
+                "label": "Pay 2 credits and trash 2 cards from HQ",
+                "instructions": [
+                  {
+                    "type": "end_run"
+                  }
+                ],
+                "credit_cost": 2,
+                "trash_hand_cost": 2
+              },
+              {
+                "option_id": "decline",
+                "label": "Continue the run",
+                "instructions": []
+              }
+            ]
+          }
+        ],
+        "scope": "any",
+        "condition": "run_on_source_server"
+      }
+    ]
+  },
+  "30056": {
+    "play_instructions": [
+      {
+        "type": "choose_effect",
+        "player": "corp",
+        "options": [
+          {
+            "option_id": "gain_credits",
+            "label": "Gain 3 credits",
+            "instructions": [
+              {
+                "type": "gain_credits",
+                "amount": 3
+              }
+            ]
+          },
+          {
+            "option_id": "draw_cards",
+            "label": "Draw 3 cards",
+            "instructions": [
+              {
+                "type": "draw_cards",
+                "amount": 3
+              }
+            ]
+          }
+        ],
+        "repeat_if_tagged": true
+      }
+    ]
+  },
+  "30060": {
+    "score_instructions": [
+      {
+        "type": "select_cards",
+        "player": "corp",
+        "side": "runner",
+        "zone": "installed",
+        "card_types": [
+          "resource"
+        ],
+        "optional": true
+      }
+    ]
   }
 }

@@ -19,8 +19,10 @@ from content.cards.models import (
     LoseClickIfAny,
     PlaceVirusCounters,
     PlayInstruction,
+    SelectCards,
     TaggedDamage,
     TakeCredits,
+    TrashAccessed,
     TrashSource,
 )
 
@@ -45,10 +47,15 @@ def resolve_effect(state: GameState, player: PlayerState, instruction: PlayInstr
         give_tags(state, instruction.amount, definitions or {})
     elif isinstance(instruction, ChooseEffect):
         from .choices import open_choice
-        open_choice(state, instruction, source, fact)
+        open_choice(state, instruction, source, fact, player)
+    elif isinstance(instruction, SelectCards):
+        from .choices import open_selection
+        open_selection(state, instruction, source, fact, definitions or {})
+    elif isinstance(instruction, TrashAccessed):
+        from .runs import trash_accessed_card
+        trash_accessed_card(state, definitions or {})
     elif isinstance(instruction, EndRunEffect):
         from .runs import end_run
-        state.suspended_windows.clear()
         end_run(state, definitions or {})
     elif isinstance(instruction, DealDamage):
         counters = set_aside_counters if set_aside_counters is not None else (source.counters if source else {})

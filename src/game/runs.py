@@ -18,6 +18,7 @@ from content.cards.models import (
     TakeCredits,
 )
 
+from .card_movement import trash_installed_card
 from .commands import AccessCard, ContinueRun, FinishAccess, JackOut, RunServer
 from .effects import resolve_effect
 from .installation import agenda_points, remove_empty_remotes
@@ -120,7 +121,10 @@ def cleanup_run(state: GameState) -> None:
 def end_run(state: GameState, definitions: Mapping[str, CardDefinition]) -> None:
     """Expire run-only funds before run-end reactions (CR 6.9.6), retaining context."""
     run = state.run
-    state.window = None
+    if run.phase == "ended":
+        return
+    if state.window and state.window.kind == "paid":
+        state.window = None
     run.current_card_id = None
     run.current_ice_id = None
     run.strength_boosts = {}
@@ -145,7 +149,11 @@ def advance_run(state: GameState, definitions: Mapping[str, CardDefinition]) -> 
     while state.winner is None and state.run and state.window is None and state.run.pending_step and not state.memory_trash_pending:
         step = state.run.pending_step
         state.run.pending_step = None
-        if step == "breach":
+        if step == "success":
+            begin_success(state, definitions)
+        elif step == "mid_access":
+            emit_fact(state, definitions, run_fact(state, "mid_access", card_instance_id=state.run.current_card_id))
+        elif step == "breach":
             begin_breach(state, definitions)
         elif step == "encounter_window":
             run_window(state, "resolve_subroutines", definitions, rez_allowed=False)
@@ -200,6 +208,7 @@ def resolve_run_command(state: GameState, command, definitions: Mapping[str, Car
         run.visible_card_ids.append(card.instance_id)
         run.current_card_id = card.instance_id
         run.phase = "access"
+        run.pending_step = "mid_access"
         emit_fact(state, definitions, run_fact(state, "access", card_instance_id=card.instance_id), auto_single=True)
         return
     elif isinstance(command, FinishAccess):
@@ -207,41 +216,63 @@ def resolve_run_command(state: GameState, command, definitions: Mapping[str, Car
         definition = definitions.get(card.definition_id)
         if definition is None:
             raise IllegalCommand("Card definitions are required to resolve access")
-        if command.trash or definition.card_type is CardType.AGENDA:
+        if command.trash:
+            if (definition.trash_cost is None or card.location.zone is CardZone.DISCARD_PILE):
+                raise IllegalCommand("This accessed card cannot be trashed for its trash cost")
+            spend_runner_credits(state, definition.trash_cost)
+            trash_accessed_card(state, definitions)
+            return
+        if definition.card_type is CardType.AGENDA:
             was_deck = card.location.zone is CardZone.DECK
-            was_root = card.location.server is not None
-            if command.trash:
-                cost = definition.trash_cost
-                spend_runner_credits(state, cost)
-                # CR 9.12.5: capture persistence simultaneously with access trashing.
-                if card.rezzed and any(a.persistent for a in definition.triggered_abilities):
-                    run.persistent_sources[card.instance_id] = card.location.model_copy(deep=True)
-                destination = ZoneLocation(zone=CardZone.DISCARD_PILE, player_id=state.corp.player_id)
-            else:
-                run.agendas_stolen += 1
-                destination = ZoneLocation(zone=CardZone.SCORE_AREA, player_id=state.runner.player_id)
+            run.agendas_stolen += 1
             state.card_instances[card.instance_id] = card.model_copy(update={
-                "location": destination, "installed": False, "rezzed": False,
-                "face_up": True, "counters": {}, "loaded_counter_types": set(), "controller_id": None, "ability_last_used_turn": {},
+                "location": ZoneLocation(zone=CardZone.SCORE_AREA, player_id=state.runner.player_id),
+                "installed": False, "rezzed": False, "face_up": True, "counters": {},
+                "loaded_counter_types": set(), "controller_id": None, "ability_last_used_turn": {},
             })
             if was_deck:
-                deck = sorted((c for c in state.card_instances.values()
-                               if c.location.zone is CardZone.DECK and c.owner_id == state.corp.player_id),
-                              key=lambda c: c.location.deck_position)
-                for position, remaining in enumerate(deck, 1):
-                    remaining.location.deck_position = position
-            # CR 7.4.5: an upgrade trashed from Archives' root is a new candidate.
-            if command.trash and was_root and run.server_id is CentralServer.ARCHIVES:
-                run.accessed_card_ids.remove(card.instance_id)
+                reindex_corp_deck(state)
             if agenda_points(state, state.runner, definitions) >= 7:
                 state.winner = PlayerRole.RUNNER
                 end_run(state, definitions)
                 return
         run.pending_step = "finish_access"
-        if command.trash:
-            emit_fact(state, definitions, run_fact(state, "access_trash", card_instance_id=card.instance_id))
-        elif definition.card_type is CardType.AGENDA:
+        if definition.card_type is CardType.AGENDA:
             emit_fact(state, definitions, run_fact(state, "steal", card_instance_id=card.instance_id), auto_single=True)
+
+
+def reindex_corp_deck(state):
+    cards = sorted((c for c in state.card_instances.values() if c.location.zone is CardZone.DECK
+                    and c.owner_id == state.corp.player_id), key=lambda c: c.location.deck_position)
+    for position, card in enumerate(cards, 1):
+        card.location.deck_position = position
+
+
+def trash_accessed_card(state, definitions):
+    """Share basic/effect trashing, persistence and hosted-card cleanup (CR 7.1.5)."""
+    run = state.run
+    card = state.card_instances[run.current_card_id]
+    if card.location.zone is CardZone.DISCARD_PILE:
+        raise IllegalCommand("Cannot trash a card already in Archives")
+    definition = definitions[card.definition_id]
+    was_deck = card.location.zone is CardZone.DECK
+    was_root = card.location.server is not None
+    if card.rezzed and any(a.persistent for a in definition.triggered_abilities):
+        run.persistent_sources[card.instance_id] = card.location.model_copy(deep=True)
+    trash_installed_card(state, card)
+    if was_deck:
+        reindex_corp_deck(state)
+    if was_root and run.server_id is CentralServer.ARCHIVES:
+        run.accessed_card_ids.remove(card.instance_id)
+    run.pending_step = "finish_access"
+    emit_fact(state, definitions, run_fact(state, "access_trash", card_instance_id=card.instance_id))
+
+
+def approach_server(state, definitions):
+    """Resolve approach abilities before success, after the last rez window."""
+    state.run.pending_step = "success"
+    emit_fact(state, definitions, run_fact(state, "approach_server"))
+    advance_run(state, definitions)
 
 
 def begin_success(state: GameState, definitions: Mapping[str, CardDefinition]) -> None:
@@ -328,7 +359,7 @@ def resume_run(state, continuation, definitions):
         elif continuation == "approach":
             enter_movement(state, definitions)
         else:
-            begin_success(state, definitions)
+            approach_server(state, definitions)
     elif continuation == "encounter":
         ice = state.card_instances[run.current_ice_id]
         if ice.rezzed:
@@ -343,7 +374,7 @@ def resume_run(state, continuation, definitions):
     elif continuation == "resolve_subroutines":
         resolve_subroutines(state, definitions)
     elif continuation == "breach":
-        begin_success(state, definitions)
+        approach_server(state, definitions)
 
 
 def enter_movement(state, definitions):

@@ -287,7 +287,7 @@ class ReactionTests(ReactionScenario):
         self.assertEqual({a["server_id"] for a in actions}, {"hq", "rd", "archives"})
 
     def test_repeated_archives_accesses_are_occurrences_and_steals_are_retained(self):
-        target = self.add_card("30042", PlayerRole.CORP)  # Manegarm, then move to Archives root
+        target = self.add_card("30058", PlayerRole.CORP)  # AMAZE, then move to Archives root
         self.state.card_instances[target].location.server.server_id = "archives"
         self.state.servers.remove(1)
         self.turn(PlayerRole.RUNNER)

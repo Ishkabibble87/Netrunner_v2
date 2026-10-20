@@ -10,7 +10,12 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from content.cards.models import ChooseEffect, PlayInstruction
+from content.cards.models import (
+    ChooseEffect,
+    EffectOption,
+    PlayInstruction,
+    SelectCards,
+)
 
 
 class DomainModel(BaseModel):
@@ -161,6 +166,7 @@ class CardInstance(DomainModel):
         description="Face status when the current zone or game state uses it; otherwise None",
     )
     installed: bool = False
+    installed_turn: int | None = Field(default=None, ge=1)
     rezzed: bool = False
     ability_last_used_turn: dict[str, int] = Field(default_factory=dict)
 
@@ -308,10 +314,16 @@ class PriorityWindow(DomainModel):
     stack, including the next instruction of the resolving parent ability.
     """
 
-    kind: Literal["paid", "reaction", "choice"]
+    kind: Literal["paid", "reaction", "choice", "target"]
     choice: ChooseEffect | None = None
     choice_source_id: UUID | None = None
     choice_fact: RuleFact | None = None
+    choice_effect_player: PlayerRole | None = None
+    choice_ability_id: str | None = None
+    choice_remaining: int = 1
+    chosen_options: list[str] = Field(default_factory=list)
+    selection: SelectCards | None = None
+    payment_option: EffectOption | None = None
     player: PlayerRole
     reactions: list[PendingReaction] = Field(default_factory=list)
     resolving: EffectContinuation | None = None
@@ -335,7 +347,7 @@ class RunState(DomainModel):
     successful_take_credits: int = Field(default=0, ge=0)
     access_count: int = Field(default=0, ge=0)
     agendas_stolen: int = Field(default=0, ge=0)
-    pending_step: Literal["breach", "access_choices", "finish_access", "encounter_window", "subroutines", "cleanup"] | None = None
+    pending_step: Literal["success", "mid_access", "breach", "access_choices", "finish_access", "encounter_window", "subroutines", "cleanup"] | None = None
     server_id: ServerId
     phase: Literal["initiation", "approach", "encounter", "movement", "success", "breach", "access", "subroutine_choice", "ended"] = "movement"
     delayed_reactions: list[PendingReaction] = Field(default_factory=list)
@@ -499,5 +511,5 @@ class PendingDecision(DomainModel):
     """Public decision context, excluding private cards and executable choices."""
 
     player: PlayerRole
-    type: Literal["choose_opening_hand", "choose_action", "discard_to_hand_limit", "paid_ability_window", "resolve_reaction", "choose_effect", "continue_run", "choose_access", "resolve_access", "trash_for_memory"]
+    type: Literal["choose_opening_hand", "choose_action", "discard_to_hand_limit", "paid_ability_window", "resolve_reaction", "choose_effect", "choose_cards", "continue_run", "choose_access", "resolve_access", "trash_for_memory"]
     cards_to_discard: int | None = None

@@ -9,6 +9,7 @@ from uuid import UUID, uuid4
 
 from content.cards.models import CardDefinition
 from game.commands import (
+    CardSelection,
     ChooseEffectOption,
     ChooseMulligan,
     DiscardCards,
@@ -18,6 +19,7 @@ from game.commands import (
     PassPriority,
     ResolveReaction,
     RezCard,
+    SelectEffectCards,
     TrashPrograms,
 )
 from game.engine import apply_command, legal_actions_for, pending_decision
@@ -55,7 +57,9 @@ def advance_ai_decisions(state: GameState, ai_player_ids: set[UUID], card_defini
         if not actions:
             break
         selection = next((a for a in actions if isinstance(a, DiscardSelection)), None)
-        command = (DiscardCards(selection.eligible_card_instance_ids[:selection.required_count])
+        targets = next((a for a in actions if isinstance(a, CardSelection)), None)
+        command = (SelectEffectCards(targets.eligible_card_instance_ids[:targets.required_count]) if targets else
+                   DiscardCards(selection.eligible_card_instance_ids[:selection.required_count])
                    if selection else next((a for a in actions if isinstance(a, (ChooseEffectOption, TrashPrograms, ResolveReaction, PassPriority))), GainCredit()))
         if state.run is not None:
             command = next((a for a in actions if isinstance(a, RezCard)), command)
