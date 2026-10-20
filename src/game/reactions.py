@@ -11,6 +11,7 @@ from uuid import uuid4
 from content.cards.models import (
     ActionAbility,
     CardDefinition,
+    ChooseEffect,
     PlayInstruction,
     TrashSource,
 )
@@ -99,6 +100,10 @@ def collect_fact(state: GameState, definitions: Mapping[str, CardDefinition], fa
                 if (not installed_definition or installed_definition.card_type.value != "program"
                         or "Virus" not in installed_definition.subtypes):
                     continue
+            if ability.condition == "accessed_outside_archives":
+                accessed = state.card_instances.get(fact.card_instance_id)
+                if not accessed or accessed.location.zone is CardZone.DISCARD_PILE:
+                    continue
             if ability.condition == "successful_run" and (not state.run or not state.run.successful):
                 continue
             if ability.condition in {"run_on_source_server", "agenda_stolen_here"}:
@@ -135,7 +140,7 @@ def collect_turn_end(state: GameState, definitions: Mapping[str, CardDefinition]
 
 
 def open_reactions(state: GameState, definitions: Mapping[str, CardDefinition],
-                   reactions: list[PendingReaction], *, auto_single: bool = False) -> None:
+                   reactions: list[PendingReaction], *, auto_single: bool = False, cost_paid: bool = False) -> None:
     """Suspend the current window; only an unambiguous mandatory effect auto-runs."""
     if not reactions or state.winner is not None:
         return
@@ -146,6 +151,8 @@ def open_reactions(state: GameState, definitions: Mapping[str, CardDefinition],
         reaction = reactions[0]
         state.window.reactions = []
         state.window.resolving = EffectContinuation(reaction=reaction)
+    if cost_paid:
+        checkpoint(state, definitions)
     settle_reactions(state, definitions)
 
 
@@ -236,7 +243,8 @@ def settle_reactions(state: GameState, definitions: Mapping[str, CardDefinition]
                 resolve_effect(state, player, instruction, source, reaction.fact,
                                set_aside_counters=reaction.set_aside_counters if reaction.set_aside_counters else None,
                                definitions=definitions)
-                if reaction.once_per_turn and before != state.model_dump() and source_present(state, reaction):
+                if (reaction.once_per_turn and not isinstance(instruction, ChooseEffect)
+                        and before != state.model_dump() and source_present(state, reaction)):
                     state.card_instances[reaction.card_instance_id].ability_last_used_turn[reaction.ability_id] = state.turn.number
             checkpoint(state, definitions)
             continue
@@ -290,13 +298,13 @@ def resolve_sequence(state: GameState, definitions: Mapping[str, CardDefinition]
 
 
 def resolve_instructions(state, definitions, player, card, instructions, ability_id, label,
-                         *, fact=None, discard_after=False):
+                         *, fact=None, discard_after=False, cost_paid=False):
     """Resolve a mandatory sequence with checkpoints and an optional play cleanup."""
     reaction = make_reaction(state, card, ability_id, label, instructions,
         fact or RuleFact(type="action", player=player.role, card_instance_id=card.instance_id))
     reaction.discard_after_resolution = discard_after
     reaction.player = player.role
-    open_reactions(state, definitions, [reaction], auto_single=True)
+    open_reactions(state, definitions, [reaction], auto_single=True, cost_paid=cost_paid)
 
 
 def basic_draw_amount(state: GameState, player: PlayerState, definitions: Mapping[str, CardDefinition]) -> int:

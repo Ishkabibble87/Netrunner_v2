@@ -1,42 +1,153 @@
-"""Suspend effect resolution for Task 7's authored, affordable decision branches.
+"""Resolve modal effects, private targets, and complete branch payments.
 
-The existing reaction stack retains the parent continuation. Resolving a branch
-uses the same instruction checkpoints, so tag reactions finish before its parent.
+The existing window stack retains the original ability and its controller while
+another player chooses. Card selections describe eligible sets rather than
+materializing every combination; submissions are revalidated on a private copy.
 """
 
-from .commands import ChooseEffectOption
-from .models import GameState, PlayerRole, PriorityWindow
+from content.cards.models import EffectOption, SelectCards
+
+from .commands import CardSelection, ChooseEffectOption
+from .models import CardZone, GameState, PlayerRole, PriorityWindow, ZoneLocation
 from .payments import runner_funds, spend_runner_credits
 from .setup import IllegalCommand
 
 
+def selection_candidates(state, instruction, definitions):
+    """Find targets without revealing a private zone to the opposing player."""
+    owner = state.corp if instruction.side == "corp" else state.runner
+    return tuple(card.instance_id for card in state.card_instances.values()
+        if ((instruction.side == "any" or card.owner_id == owner.player_id)
+            and ((instruction.zone == "hand" and card.location.zone is CardZone.HAND
+                  and card.location.player_id == owner.player_id)
+                 or (instruction.zone == "installed" and card.installed))
+            and (not instruction.card_types or definitions[card.definition_id].card_type in instruction.card_types)
+            and (not instruction.not_installed_this_turn or card.installed_turn != state.turn.number
+                 or card.owner_id != (state.corp if instruction.player == "corp" else state.runner).player_id)))
+
+
+def card_selection(state, definitions):
+    window = state.window
+    eligible = selection_candidates(state, window.selection, definitions)
+    return CardSelection(eligible, min(window.selection.count, len(eligible)), window.selection.optional)
+
+
+def can_pay_option(state, role, option):
+    player = state.corp if role is PlayerRole.CORP else state.runner
+    funds = runner_funds(state) if role is PlayerRole.RUNNER else player.credits
+    hand_count = sum(c.location.zone is CardZone.HAND and c.location.player_id == player.player_id
+                     for c in state.card_instances.values())
+    return (funds >= option.credit_cost and player.clicks_remaining >= option.click_cost
+            and hand_count >= option.trash_hand_cost)
+
+
 def choice_options(state: GameState):
     window = state.window
-    funds = runner_funds(state) if window.player is PlayerRole.RUNNER else state.corp.credits
-    return tuple(option for option in window.choice.options if option.credit_cost <= funds)
+    options = tuple(option for option in window.choice.options
+                    if option.option_id not in window.chosen_options
+                    and can_pay_option(state, window.player, option))
+    if window.chosen_options:
+        options += (EffectOption(option_id="finish", label="Finish resolving modes"),)
+    return options
 
 
-def open_choice(state, instruction, source, fact):
+def open_choice(state, instruction, source, fact, player):
+    parent = state.window.resolving if state.window and state.window.kind == "reaction" else None
     state.suspended_windows.append(state.window)
     state.window = PriorityWindow(kind="choice", player=PlayerRole(instruction.player),
-        choice=instruction, choice_source_id=source.instance_id, choice_fact=fact)
+        choice=instruction, choice_source_id=source.instance_id, choice_fact=fact,
+        choice_effect_player=player.role,
+        choice_ability_id=parent.reaction.ability_id if parent and parent.reaction.once_per_turn else None,
+        choice_remaining=2 if instruction.repeat_if_tagged and state.runner.tags else 1)
 
 
-def resolve_choice(state, definitions, command: ChooseEffectOption):
-    """Validate before spending, then restore the suspended instruction sequence."""
-    from .reactions import resolve_instructions, settle_reactions
+def open_selection(state, instruction, source, fact, definitions):
+    if not selection_candidates(state, instruction, definitions):
+        return  # CR 1.15.2e: resolve as much as possible if no targets exist.
+    state.suspended_windows.append(state.window)
+    state.window = PriorityWindow(kind="target", player=PlayerRole(instruction.player),
+        selection=instruction, choice_source_id=source.instance_id, choice_fact=fact)
+
+
+def _trash_hand(state, instance_ids, role):
+    for instance_id in instance_ids:
+        card = state.card_instances[instance_id]
+        card.face_up = role is PlayerRole.RUNNER
+        card.location = ZoneLocation(zone=CardZone.DISCARD_PILE, player_id=card.owner_id)
+
+
+def resolve_selection(state, definitions, command):
+    """Revalidate the whole set before paying a cost or changing any target."""
+    from .card_movement import trash_installed_card
+    from .installation import remove_empty_remotes
+    from .reactions import checkpoint, settle_reactions
+
+    window = state.window
+    descriptor = card_selection(state, definitions)
+    selected = command.card_instance_ids
+    if (len(set(selected)) != len(selected) or not set(selected) <= set(descriptor.eligible_card_instance_ids)
+            or (len(selected) != descriptor.required_count and not (descriptor.optional and not selected))):
+        raise IllegalCommand("Choose the required number of distinct eligible cards")
+    state.window = state.suspended_windows.pop()
+    if window.payment_option is not None:
+        if not selected:
+            return  # Selection was cancelled before any part of the cost was paid.
+        resolve_choice(state, definitions, ChooseEffectOption(window.payment_option.option_id), payment_cards=selected)
+        return
+    for instance_id in selected:
+        card = state.card_instances[instance_id]
+        if window.selection.effect == "place_advancement":
+            # CR 1.18.2: counter placement does not emit an advance occurrence.
+            card.counters["advancement"] = card.counters.get("advancement", 0) + window.selection.amount
+        elif card.installed:
+            trash_installed_card(state, card)
+        else:
+            _trash_hand(state, (instance_id,), window.player)
+    if state.run is None:
+        remove_empty_remotes(state)
+    checkpoint(state, definitions)
+    settle_reactions(state, definitions)
+
+
+def resolve_choice(state, definitions, command: ChooseEffectOption, *, payment_cards=None):
+    """Resolve one mode or pay a complete cost, retaining the effect controller."""
+    from .reactions import checkpoint, resolve_instructions, settle_reactions
 
     option = next((o for o in choice_options(state) if o.option_id == command.option_id), None)
     if option is None:
         raise IllegalCommand("Choose an available effect option")
     window = state.window
-    player = state.runner if window.player is PlayerRole.RUNNER else state.corp
+    if option.trash_hand_cost and payment_cards is None:
+        instruction = SelectCards(player=window.player.value, side=window.player.value,
+                                  zone="hand", count=option.trash_hand_cost, optional=True)
+        state.suspended_windows.append(window)
+        state.window = PriorityWindow(kind="target", player=window.player, selection=instruction,
+                                      payment_option=option, choice_source_id=window.choice_source_id)
+        return
+    if option.trash_hand_cost:
+        eligible = selection_candidates(state, SelectCards(player=window.player.value, side=window.player.value,
+                                        zone="hand", count=option.trash_hand_cost), definitions)
+        if (len(payment_cards) != option.trash_hand_cost or len(set(payment_cards)) != len(payment_cards)
+                or not set(payment_cards) <= set(eligible)):
+            raise IllegalCommand("Pay the entire hand-trash cost")
+    payer = state.corp if window.player is PlayerRole.CORP else state.runner
+    recipient = state.corp if window.choice_effect_player is PlayerRole.CORP else state.runner
     if window.player is PlayerRole.RUNNER:
         spend_runner_credits(state, option.credit_cost)
     else:
-        player.credits -= option.credit_cost
-    state.window = state.suspended_windows.pop()
+        payer.credits -= option.credit_cost
+    payer.clicks_remaining -= option.click_cost
+    _trash_hand(state, payment_cards or (), window.player)
+    if window.choice_ability_id and option.instructions:
+        state.card_instances[window.choice_source_id].ability_last_used_turn[window.choice_ability_id] = state.turn.number
+    window.chosen_options.append(option.option_id)
+    window.choice_remaining -= 1
+    if option.option_id == "finish" or window.choice_remaining == 0:
+        state.window = state.suspended_windows.pop()
+    # Costs are paid in full before the cost-paid checkpoint (CR 1.16.1, 1.16.3).
     if option.instructions:
-        resolve_instructions(state, definitions, player, state.card_instances[window.choice_source_id],
-            option.instructions, option.option_id, option.label, fact=window.choice_fact)
+        resolve_instructions(state, definitions, recipient, state.card_instances[window.choice_source_id],
+            option.instructions, option.option_id, option.label, fact=window.choice_fact, cost_paid=True)
+    else:
+        checkpoint(state, definitions)
     settle_reactions(state, definitions)

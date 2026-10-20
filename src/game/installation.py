@@ -117,7 +117,7 @@ def install_card(state: GameState, player: PlayerState, command: InstallCard,
         player.credits -= cost
         player.clicks_remaining -= 1
         card = state.card_instances[command.card_instance_id].model_copy(update={
-            "installed": True, "rezzed": False, "face_up": True,
+            "installed": True, "installed_turn": state.turn.number, "rezzed": False, "face_up": True,
             "location": ZoneLocation(zone=CardZone.PLAY_AREA, host_card_instance_id=command.host_card_instance_id),
         })
         state.card_instances[card.instance_id] = card
@@ -149,7 +149,7 @@ def install_card(state: GameState, player: PlayerState, command: InstallCard,
     card = state.card_instances[command.card_instance_id]
     area = ServerArea.ICE if definition.card_type is CardType.ICE else ServerArea.ROOT
     state.card_instances[card.instance_id] = card.model_copy(update={
-        "installed": True, "rezzed": False, "face_up": False,
+        "installed": True, "installed_turn": state.turn.number, "rezzed": False, "face_up": False,
         "location": ZoneLocation(zone=CardZone.PLAY_AREA, server=ServerLocation(
             server_id=target, area=area, ice_distance_from_server=len(ice) if area is ServerArea.ICE else None))})
     player.credits -= cost

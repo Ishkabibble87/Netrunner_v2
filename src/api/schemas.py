@@ -17,9 +17,11 @@ from pydantic import BaseModel, ConfigDict, Field
 from content.cards.models import CardDefinition, CardSide, CardType
 from content.decks.models import PreconstructedDeck
 from content.opponents.models import OpponentProfile
+from game.choices import card_selection, choice_options
 from game.commands import (
     AccessCard,
     AdvanceCard,
+    CardSelection,
     ChooseEffectOption,
     ChooseMulligan,
     ContinueRun,
@@ -39,6 +41,7 @@ from game.commands import (
     RezCard,
     RunServer,
     ScoreAgenda,
+    SelectEffectCards,
     TrashPrograms,
     TrashResource,
     UseCardAbility,
@@ -106,6 +109,20 @@ class ChooseEffectOptionRequest(ApiModel):
     option_id: str
 
 
+class SelectEffectCardsRequest(ApiModel):
+    type: Literal["select_effect_cards"]
+    card_instance_ids: list[UUID]
+
+
+class CardSelectionAction(ApiModel):
+    """Private eligible set; the server validates the submitted selection."""
+
+    type: Literal["select_effect_cards"] = "select_effect_cards"
+    eligible_card_instance_ids: list[UUID]
+    required_count: int
+    optional: bool = False
+
+
 class TrashResourceRequest(ApiModel):
     type: Literal["trash_resource"]
     card_instance_id: UUID
@@ -145,7 +162,7 @@ class DecisionView(ApiModel):
     """Public context shared by both players, never hidden card choices."""
 
     player: PlayerRole
-    type: Literal["choose_opening_hand", "choose_action", "discard_to_hand_limit", "paid_ability_window", "resolve_reaction", "choose_effect", "continue_run", "choose_access", "resolve_access", "trash_for_memory"]
+    type: Literal["choose_opening_hand", "choose_action", "discard_to_hand_limit", "paid_ability_window", "resolve_reaction", "choose_effect", "choose_cards", "continue_run", "choose_access", "resolve_access", "trash_for_memory"]
     cards_to_discard: int | None = None
 
 
@@ -230,6 +247,7 @@ PlayerCommandRequest = Annotated[
     | GainCreditCommandRequest
     | DrawCardCommandRequest
     | RemoveTagCommandRequest
+    | SelectEffectCardsRequest
     | ChooseEffectOptionRequest
     | TrashResourceRequest
     | PurgeVirusCountersCommandRequest
@@ -247,11 +265,13 @@ PlayerCommandRequest = Annotated[
 ]
 
 
-LegalAction = PlayerCommandRequest | DiscardCardsAction
+LegalAction = PlayerCommandRequest | DiscardCardsAction | CardSelectionAction
 
 
 def game_command_from_request(request: PlayerCommandRequest) -> GameCommand:
     """Translate a validated API command into the transport-independent game type."""
+    if isinstance(request, SelectEffectCardsRequest):
+        return SelectEffectCards(tuple(request.card_instance_ids))
     if isinstance(request, ChooseEffectOptionRequest):
         return ChooseEffectOption(request.option_id)
     if isinstance(request, TrashResourceRequest):
@@ -299,8 +319,13 @@ def game_command_from_request(request: PlayerCommandRequest) -> GameCommand:
     raise ValueError("Unsupported API command")
 
 
-def command_request_from_game(command: GameCommand | DiscardSelection) -> LegalAction:
+def command_request_from_game(command: GameCommand | DiscardSelection | CardSelection) -> LegalAction:
     """Project a domain command into the shape clients can submit and display."""
+    if isinstance(command, CardSelection):
+        return CardSelectionAction(eligible_card_instance_ids=list(command.eligible_card_instance_ids),
+                                   required_count=command.required_count, optional=command.optional)
+    if isinstance(command, SelectEffectCards):
+        return SelectEffectCardsRequest(type="select_effect_cards", card_instance_ids=list(command.card_instance_ids))
     if isinstance(command, ChooseEffectOption):
         return ChooseEffectOptionRequest(type="choose_effect_option", option_id=command.option_id)
     if isinstance(command, TrashResource):
@@ -478,6 +503,7 @@ class InitialGameView(ApiModel):
     servers: list[str | int]
     reactions: list[ReactionView] = Field(default_factory=list)
     effect_options: dict[str, str] = Field(default_factory=dict)
+    selection_cards: list[CardView] = Field(default_factory=list)
     installed_cards: list[InstalledCardView]
     run: RunView | None = None
 
@@ -563,7 +589,9 @@ class InitialGameView(ApiModel):
                            or state.card_instances[i].location.zone is not CardZone.DECK}
         decision = pending_decision(state, card_definitions)
         return cls(
-            effect_options={o.option_id: o.label for o in state.window.choice.options}
+            selection_cards=[card_view(i) for i in card_selection(state, card_definitions).eligible_card_instance_ids]
+                if state.window and state.window.kind == "target" and state.window.player is you.role else [],
+            effect_options={o.option_id: o.label for o in choice_options(state)}
                 if state.window and state.window.kind == "choice" and state.window.player is you.role else {},
             run=RunView(
                 server_id=state.run.server_id, phase=state.run.phase,

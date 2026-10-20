@@ -12,10 +12,11 @@ from content.cards.models import CardDefinition, InitiateRun
 
 from .card_movement import draw_from_deck, trash_installed_card
 from .card_play import play_card, validate_card_play
-from .choices import choice_options, resolve_choice
+from .choices import card_selection, choice_options, resolve_choice, resolve_selection
 from .commands import (
     AccessCard,
     AdvanceCard,
+    CardSelection,
     ChooseEffectOption,
     ChooseMulligan,
     ContinueRun,
@@ -35,6 +36,7 @@ from .commands import (
     RezCard,
     RunServer,
     ScoreAgenda,
+    SelectEffectCards,
     TrashPrograms,
     TrashResource,
     UseCardAbility,
@@ -90,7 +92,7 @@ from .turns import advance_turn, hand_cards, maximum_hand_size
 def legal_actions_for(
     state: GameState, player_id: UUID,
     card_definitions: Mapping[str, CardDefinition] | None = None,
-) -> tuple[GameCommand | DiscardSelection, ...]:
+) -> tuple[GameCommand | DiscardSelection | CardSelection, ...]:
     """Return commands currently available to one player, in menu order.
 
     This is a player-specific projection of the current state. It is not a
@@ -124,6 +126,8 @@ def legal_actions_for(
     if state.window is not None:
         if state.window.player is not player.role:
             return ()
+        if state.window.kind == "target":
+            return (card_selection(state, definitions),)
         if state.window.kind == "choice":
             return tuple(ChooseEffectOption(o.option_id) for o in choice_options(state))
         if state.window.kind == "reaction":
@@ -258,12 +262,16 @@ def apply_command(
     player = _player_for_id(state, player_id)
     if player is None:
         raise IllegalCommand("Player is not part of this game")
-    if isinstance(command, ChooseEffectOption) or (state.window and state.window.kind == "choice"):
-        if (state.winner or not state.window or state.window.kind != "choice"
-                or state.window.player is not player.role or not isinstance(command, ChooseEffectOption)):
+    if isinstance(command, (ChooseEffectOption, SelectEffectCards)) or (state.window and state.window.kind in {"choice", "target"}):
+        if (state.winner or not state.window or state.window.kind not in {"choice", "target"}
+                or state.window.player is not player.role
+                or not isinstance(command, SelectEffectCards if state.window.kind == "target" else ChooseEffectOption)):
             raise IllegalCommand("Resolve the pending effect choice first")
         result = state.model_copy(deep=True)
-        resolve_choice(result, card_definitions or {}, command)
+        if isinstance(command, SelectEffectCards):
+            resolve_selection(result, card_definitions or {}, command)
+        else:
+            resolve_choice(result, card_definitions or {}, command)
         advance_run(result, card_definitions or {})
         advance_turn(result, card_definitions)
         return GameState.model_validate(result.model_dump())
@@ -499,6 +507,8 @@ def pending_decision(state: GameState, definitions=None) -> PendingDecision | No
         kind = {"movement": "continue_run", "subroutine_choice": "continue_run", "breach": "choose_access", "access": "resolve_access"}[state.run.phase]
         return PendingDecision(player=PlayerRole.RUNNER, type=kind)
     if state.window is not None:
+        if state.window.kind == "target":
+            return PendingDecision(player=state.window.player, type="choose_cards")
         if state.window.kind == "choice":
             return PendingDecision(player=state.window.player, type="choose_effect")
         return PendingDecision(player=state.window.player, type=("paid_ability_window" if state.window.kind == "paid" else "resolve_reaction"))
