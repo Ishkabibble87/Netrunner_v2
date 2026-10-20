@@ -177,6 +177,8 @@ class GameScreen:
                     else:
                         ability = card.get("ability_labels", {}).get(action["ability_id"], action["ability_id"])
                         suffix = "" if action["ability_id"] in card.get("paid_ability_ids", []) else " · 1 click"
+                        if action.get("server_id") is not None:
+                            suffix += f" → {self._server_label(action['server_id'])}"
                         targets = action.get("subroutine_indices", [])
                         if targets:
                             suffix += " · subroutines " + ", ".join(str(i + 1) for i in targets)
@@ -359,6 +361,9 @@ class GameScreen:
         if run:
             line(f"Run on {self._server_label(run['server_id'])} · {run['phase']}", "class:section")
             line(f"Run credits: {run.get('bad_publicity_credits', 0)} bad publicity · {run.get('event_credits', 0)} event")
+            line(f"Accesses: {run.get('access_count', 0)} · agendas stolen: {run.get('agendas_stolen', 0)}")
+            if run.get("source_card") and not run.get("source_event"):
+                line(f"Source: {run['source_card']['title']}")
             if run.get("source_event"):
                 line(f"Event: {run['source_event']['title']}")
             if run.get("server_id") in {"hq", "rd"}:

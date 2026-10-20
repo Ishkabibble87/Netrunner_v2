@@ -60,7 +60,10 @@ def record_occurrence(state: GameState, key: str) -> int:
 
 def collect_fact(state: GameState, definitions: Mapping[str, CardDefinition], fact: RuleFact) -> list[PendingReaction]:
     """Collect a fixed batch, including existing install, rez and score effects."""
-    occurrence = record_occurrence(state, f"{fact.type}:{fact.player}")
+    key = f"{fact.type}:{fact.player}"
+    if fact.type == "breach":
+        key += f":{fact.server_id}"
+    occurrence = record_occurrence(state, key)
     reactions = []
     for card in state.card_instances.values():
         definition = definitions.get(card.definition_id)
@@ -82,6 +85,8 @@ def collect_fact(state: GameState, definitions: Mapping[str, CardDefinition], fa
             if ability.scope == "self" and card.instance_id != fact.card_instance_id:
                 continue
             if ability.condition == "previously_unadvanced" and fact.previous_advancement != 0:
+                continue
+            if ability.servers is not None and fact.server_id not in ability.servers:
                 continue
             if ability.first_each_turn and occurrence != 1:
                 continue
@@ -157,7 +162,10 @@ def pending_valid(state: GameState, definitions: Mapping[str, CardDefinition], r
     card = state.card_instances[reaction.card_instance_id]
     if not source_present(state, reaction):
         return False
-    if reaction.fact.type != "score" and not active(card, definitions[card.definition_id]):
+    if (reaction.fact.type != "score"
+            and not (reaction.fact.type == "run_success" and state.run
+                     and state.run.source_event_id == card.instance_id)
+            and not active(card, definitions[card.definition_id])):
         return False
     return not (reaction.once_per_turn and
                 card.ability_last_used_turn.get(reaction.ability_id) == state.turn.number)
@@ -182,7 +190,7 @@ def settle_reactions(state: GameState, definitions: Mapping[str, CardDefinition]
             if condition_met:
                 source = state.card_instances[reaction.card_instance_id] if source_present(state, reaction) else None
                 before = state.model_dump() if reaction.once_per_turn else None
-                resolve_effect(state, player, instruction, source)
+                resolve_effect(state, player, instruction, source, reaction.fact)
                 if reaction.once_per_turn and before != state.model_dump() and source_present(state, reaction):
                     state.card_instances[reaction.card_instance_id].ability_last_used_turn[reaction.ability_id] = state.turn.number
             checkpoint(state, definitions)

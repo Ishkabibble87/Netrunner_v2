@@ -100,7 +100,7 @@
     "paid_abilities": [
       {
         "ability_id": "break_barrier",
-        "label": "Break up to 2 barrier subroutines \u00b7 1 credit",
+        "label": "Break up to 2 barrier subroutines Â· 1 credit",
         "type": "break_subroutines",
         "credit_cost": 1,
         "amount": 2,
@@ -108,7 +108,7 @@
       },
       {
         "ability_id": "boost_strength",
-        "label": "+1 strength this encounter \u00b7 2 credits",
+        "label": "+1 strength this encounter Â· 2 credits",
         "type": "boost_strength",
         "credit_cost": 2,
         "amount": 1
@@ -229,6 +229,93 @@
           }
         ],
         "condition": "previously_unadvanced"
+      }
+    ]
+  },
+  "30001": {
+    "triggered_abilities": [
+      {
+        "ability_id": "access_trash",
+        "label": "Gain 1 credit and draw 1 card",
+        "trigger": "access_trash",
+        "first_each_turn": true,
+        "instructions": [
+          {
+            "type": "gain_credits",
+            "amount": 1
+          },
+          {
+            "type": "draw_cards",
+            "amount": 1
+          }
+        ]
+      }
+    ]
+  },
+  "30010": {
+    "triggered_abilities": [
+      {
+        "ability_id": "run_access_credits",
+        "label": "Gain 1 credit per access this run",
+        "trigger": "run_end",
+        "servers": [
+          "hq",
+          "rd"
+        ],
+        "once_per_turn": true,
+        "optional": true,
+        "instructions": [
+          {
+            "type": "gain_access_credits"
+          }
+        ]
+      }
+    ]
+  },
+  "30013": {
+    "triggered_abilities": [
+      {
+        "ability_id": "hq_access",
+        "label": "Access 1 additional card from HQ",
+        "trigger": "breach",
+        "servers": [
+          "hq"
+        ],
+        "first_each_turn": true,
+        "instructions": [
+          {
+            "type": "additional_accesses",
+            "amount": 1
+          }
+        ]
+      }
+    ],
+    "install_instructions": []
+  },
+  "30018": {
+    "install_instructions": [
+      {
+        "type": "load_credits",
+        "amount": 12
+      }
+    ],
+    "trash_when_empty": true,
+    "action_abilities": [
+      {
+        "ability_id": "run_central",
+        "label": "Run a central server not run this turn",
+        "instructions": [
+          {
+            "type": "initiate_run",
+            "servers": [
+              "hq",
+              "rd",
+              "archives"
+            ],
+            "unrun_this_turn": true,
+            "successful_take_credits": 3
+          }
+        ]
       }
     ]
   }

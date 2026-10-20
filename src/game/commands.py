@@ -141,6 +141,7 @@ class UseCardAbility:
     card_instance_id: UUID
     ability_id: str
     subroutine_indices: tuple[int, ...] = ()
+    server_id: ServerId | None = None
 
 
 GameCommand = RezCard | UseCardAbility | RunServer | ContinueRun | JackOut | AccessCard | FinishAccess | InstallCard | AdvanceCard | ScoreAgenda | PassPriority | ResolveReaction | ChooseMulligan | GainCredit | DrawCard | RemoveTag | PurgeVirusCounters | DiscardCards | PlayCard

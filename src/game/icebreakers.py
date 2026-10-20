@@ -36,6 +36,8 @@ def validate_paid_ability(state: GameState, player: PlayerState, command: UseCar
         raise IllegalCommand("Choose an active supported paid ability you control")
     if state.window is None or state.window.kind != "paid" or state.window.player is not player.role:
         raise IllegalCommand("Use paid abilities only while you have priority")
+    if command.server_id is not None:
+        raise IllegalCommand("Paid abilities do not choose a server")
     funds = runner_funds(state)
     if funds < ability.credit_cost:
         raise IllegalCommand("Not enough credits to use this ability")

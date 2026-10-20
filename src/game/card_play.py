@@ -12,7 +12,7 @@ from content.cards.models import CardDefinition, CardType, InitiateRun
 
 from .effects import resolve_effect
 from .models import CardZone, GameState, PlayerRole, PlayerState, ServerId, ZoneLocation
-from .runs import start_run
+from .runs import start_run, validate_run_target
 from .setup import IllegalCommand
 
 
@@ -39,9 +39,9 @@ def validate_card_play(state: GameState, player: PlayerState, instance_id: UUID,
     if run:
         if definition.play_instructions[-1] is not run or sum(isinstance(i, InitiateRun) for i in definition.play_instructions) != 1:
             raise IllegalCommand("Supported run events must finish with a single run instruction")
-        if (player.role is not PlayerRole.RUNNER or server_id not in state.servers
-                or (run.servers is not None and server_id not in run.servers)):
-            raise IllegalCommand("Choose a legal server for this run event")
+        if player.role is not PlayerRole.RUNNER:
+            raise IllegalCommand("Only the Runner can initiate a run")
+        validate_run_target(state, run, server_id)
     elif server_id is not None:
         raise IllegalCommand("This card does not choose a server")
     return definition
@@ -60,7 +60,7 @@ def play_card(state: GameState, player: PlayerState, instance_id: UUID,
         if isinstance(instruction, InitiateRun):
             if instruction.hosted_credits:
                 card.counters["credit"] = instruction.hosted_credits
-            start_run(state, server_id, definitions, source_event_id=instance_id,
+            start_run(state, server_id, definitions, source_event_id=instance_id, source_ability_id="play",
                       successful_draw=instruction.successful_draw,
                       additional_accesses=instruction.additional_accesses)
             return

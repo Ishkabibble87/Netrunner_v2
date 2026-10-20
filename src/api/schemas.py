@@ -149,6 +149,7 @@ class UseCardAbilityCommandRequest(ApiModel):
     card_instance_id: UUID
     ability_id: str = Field(min_length=1)
     subroutine_indices: list[Annotated[int, Field(ge=0)]] = Field(default_factory=list)
+    server_id: ServerId | None = None
 
 
 class AdvanceCardCommandRequest(ApiModel):
@@ -241,7 +242,7 @@ def game_command_from_request(request: PlayerCommandRequest) -> GameCommand:
     if isinstance(request, RezCardCommandRequest):
         return RezCard(request.card_instance_id)
     if isinstance(request, UseCardAbilityCommandRequest):
-        return UseCardAbility(request.card_instance_id, request.ability_id, tuple(request.subroutine_indices))
+        return UseCardAbility(request.card_instance_id, request.ability_id, tuple(request.subroutine_indices), request.server_id)
     if isinstance(request, AdvanceCardCommandRequest):
         return AdvanceCard(request.card_instance_id)
     if isinstance(request, ScoreAgendaCommandRequest):
@@ -286,7 +287,7 @@ def command_request_from_game(command: GameCommand | DiscardSelection) -> LegalA
         return RezCardCommandRequest(type="rez_card", card_instance_id=command.card_instance_id)
     if isinstance(command, UseCardAbility):
         return UseCardAbilityCommandRequest(type="use_card_ability", card_instance_id=command.card_instance_id,
-                                           ability_id=command.ability_id, subroutine_indices=list(command.subroutine_indices))
+                                           ability_id=command.ability_id, subroutine_indices=list(command.subroutine_indices), server_id=command.server_id)
     if isinstance(command, AdvanceCard):
         return AdvanceCardCommandRequest(type="advance_card", card_instance_id=command.card_instance_id)
     if isinstance(command, ScoreAgenda):
@@ -393,6 +394,10 @@ class RunView(ApiModel):
     bad_publicity_credits: int
     event_credits: int = 0
     source_event: CardView | None = None
+    source_card: CardView | None = None
+    source_ability_id: str | None = None
+    access_count: int = 0
+    agendas_stolen: int = 0
     central_access_limit: int = 1
     central_accesses: int = 0
     current_card: CardView | None
@@ -525,6 +530,9 @@ class InitialGameView(ApiModel):
                 bad_publicity_credits=state.run.bad_publicity_credits,
                 event_credits=event_credits(state),
                 source_event=card_view(state.run.source_event_id) if state.run.source_event_id else None,
+                source_card=card_view(state.run.source_card_id) if state.run.source_card_id else None,
+                source_ability_id=state.run.source_ability_id,
+                access_count=state.run.access_count, agendas_stolen=state.run.agendas_stolen,
                 central_access_limit=state.run.access_limit,
                 central_accesses=state.run.central_accesses,
                 current_card=card_view(state.run.current_card_id)
