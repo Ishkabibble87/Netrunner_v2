@@ -173,6 +173,7 @@ class CardSelection:
     eligible_card_instance_ids: tuple[UUID, ...]
     required_count: int
     optional: bool = False
+    up_to: bool = False
 
 
 @dataclass(frozen=True)

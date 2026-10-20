@@ -121,6 +121,7 @@ class CardSelectionAction(ApiModel):
     eligible_card_instance_ids: list[UUID]
     required_count: int
     optional: bool = False
+    up_to: bool = False
 
 
 class TrashResourceRequest(ApiModel):
@@ -323,7 +324,7 @@ def command_request_from_game(command: GameCommand | DiscardSelection | CardSele
     """Project a domain command into the shape clients can submit and display."""
     if isinstance(command, CardSelection):
         return CardSelectionAction(eligible_card_instance_ids=list(command.eligible_card_instance_ids),
-                                   required_count=command.required_count, optional=command.optional)
+                                   required_count=command.required_count, optional=command.optional, up_to=command.up_to)
     if isinstance(command, SelectEffectCards):
         return SelectEffectCardsRequest(type="select_effect_cards", card_instance_ids=list(command.card_instance_ids))
     if isinstance(command, ChooseEffectOption):
@@ -458,6 +459,7 @@ class RunView(ApiModel):
     server_id: ServerId
     phase: str
     successful: bool
+    cannot_steal_or_trash: bool = False
     bad_publicity_credits: int
     event_credits: int = 0
     source_event: CardView | None = None
@@ -504,6 +506,9 @@ class InitialGameView(ApiModel):
     reactions: list[ReactionView] = Field(default_factory=list)
     effect_options: dict[str, str] = Field(default_factory=dict)
     selection_cards: list[CardView] = Field(default_factory=list)
+    revealed_cards: list[CardView] = Field(default_factory=list)
+    removed_cards: list[CardView] = Field(default_factory=list)
+    effect_install: bool = False
     installed_cards: list[InstalledCardView]
     run: RunView | None = None
 
@@ -589,11 +594,18 @@ class InitialGameView(ApiModel):
                            or state.card_instances[i].location.zone is not CardZone.DECK}
         decision = pending_decision(state, card_definitions)
         return cls(
+            revealed_cards=[card_view(i) for i in state.revealed_card_ids],
+            removed_cards=[card_view(c.instance_id) for c in state.card_instances.values()
+                           if c.location.zone is CardZone.REMOVED_FROM_GAME and c.face_up],
+            effect_install=bool(state.window and state.window.kind == "install"),
             selection_cards=[card_view(i) for i in card_selection(state, card_definitions).eligible_card_instance_ids]
-                if state.window and state.window.kind == "target" and state.window.player is you.role else [],
+                if state.window and state.window.kind == "target" and state.window.player is you.role else
+                [card_view(i) for i in state.window.install_card_ids]
+                if state.window and state.window.kind == "install" and state.window.player is you.role else [],
             effect_options={o.option_id: o.label for o in choice_options(state)}
                 if state.window and state.window.kind == "choice" and state.window.player is you.role else {},
             run=RunView(
+                cannot_steal_or_trash=state.run.cannot_steal_or_trash,
                 server_id=state.run.server_id, phase=state.run.phase,
                 successful=state.run.successful,
                 current_ice_id=state.run.current_ice_id,

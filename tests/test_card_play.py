@@ -96,7 +96,7 @@ class CardPlayTests(unittest.TestCase):
         unsupported = next(c for c in state.card_instances.values()
                            if c.owner_id == state.corp.player_id and c.definition_id == "30040")
         changed = state.model_copy(deep=True)
-        changed.card_instances[unsupported.instance_id].definition_id = "30041"  # Sprint remains unsupported.
+        changed.card_instances[unsupported.instance_id].definition_id = "30012"  # Tread Lightly remains unsupported.
         changed.card_instances[unsupported.instance_id].location = ZoneLocation(zone=CardZone.HAND, player_id=state.corp.player_id)
         remaining = sorted((c for c in changed.card_instances.values()
                             if c.owner_id == state.corp.player_id and c.location.zone is CardZone.DECK),

@@ -20,8 +20,14 @@ def selection_candidates(state, instruction, definitions):
         if ((instruction.side == "any" or card.owner_id == owner.player_id)
             and ((instruction.zone == "hand" and card.location.zone is CardZone.HAND
                   and card.location.player_id == owner.player_id)
+                 or (instruction.zone == "deck" and card.location.zone is CardZone.DECK)
+                 or (instruction.zone == "discard" and card.location.zone is CardZone.DISCARD_PILE)
+                 or (instruction.zone == "hand_or_discard" and card.location.zone in {CardZone.HAND, CardZone.DISCARD_PILE})
+                 or (instruction.zone == "set_aside" and card.location.zone is CardZone.SET_ASIDE)
                  or (instruction.zone == "installed" and card.installed))
             and (not instruction.card_types or definitions[card.definition_id].card_type in instruction.card_types)
+            and definitions[card.definition_id].card_type not in instruction.exclude_types
+            and all(s in definitions[card.definition_id].subtypes for s in instruction.subtypes)
             and (not instruction.not_installed_this_turn or card.installed_turn != state.turn.number
                  or card.owner_id != (state.corp if instruction.player == "corp" else state.runner).player_id)))
 
@@ -29,10 +35,15 @@ def selection_candidates(state, instruction, definitions):
 def card_selection(state, definitions):
     window = state.window
     eligible = selection_candidates(state, window.selection, definitions)
-    return CardSelection(eligible, min(window.selection.count, len(eligible)), window.selection.optional)
+    count = len(eligible) if window.selection.any_number else min(window.selection.count, len(eligible))
+    return CardSelection(eligible, count, window.selection.optional,
+                         window.selection.up_to or window.selection.any_number)
 
 
 def can_pay_option(state, role, option):
+    if (state.run and state.run.cannot_steal_or_trash
+            and any(i.type == "trash_accessed" for i in option.instructions)):
+        return False
     player = state.corp if role is PlayerRole.CORP else state.runner
     funds = runner_funds(state) if role is PlayerRole.RUNNER else player.credits
     hand_count = sum(c.location.zone is CardZone.HAND and c.location.player_id == player.player_id
@@ -62,11 +73,19 @@ def open_choice(state, instruction, source, fact, player):
 
 
 def open_selection(state, instruction, source, fact, definitions):
+    if instruction.effect == "install":
+        from .effect_installation import open_install
+        open_install(state, instruction, source, fact, definitions)
+        return
     if not selection_candidates(state, instruction, definitions):
+        if instruction.effect in {"search", "shuffle"}:
+            from .card_movement import shuffle_into_deck
+            owner = state.corp if instruction.side == "corp" else state.runner
+            shuffle_into_deck(state, owner.player_id)
         return  # CR 1.15.2e: resolve as much as possible if no targets exist.
     state.suspended_windows.append(state.window)
     state.window = PriorityWindow(kind="target", player=PlayerRole(instruction.player),
-        selection=instruction, choice_source_id=source.instance_id, choice_fact=fact)
+        selection=instruction, choice_source_id=source.instance_id if source else None, choice_fact=fact)
 
 
 def _trash_hand(state, instance_ids, role):
@@ -86,7 +105,8 @@ def resolve_selection(state, definitions, command):
     descriptor = card_selection(state, definitions)
     selected = command.card_instance_ids
     if (len(set(selected)) != len(selected) or not set(selected) <= set(descriptor.eligible_card_instance_ids)
-            or (len(selected) != descriptor.required_count and not (descriptor.optional and not selected))):
+            or (len(selected) > descriptor.required_count if descriptor.up_to else
+                (len(selected) != descriptor.required_count and not (descriptor.optional and not selected)))):
         raise IllegalCommand("Choose the required number of distinct eligible cards")
     state.window = state.suspended_windows.pop()
     if window.payment_option is not None:
@@ -94,9 +114,35 @@ def resolve_selection(state, definitions, command):
             return  # Selection was cancelled before any part of the cost was paid.
         resolve_choice(state, definitions, ChooseEffectOption(window.payment_option.option_id), payment_cards=selected)
         return
+    instruction = window.selection
+    owner = state.corp if instruction.side == "corp" else state.runner
+    cards = [state.card_instances[i] for i in selected]
+    if instruction.effect == "shuffle":
+        from .card_movement import shuffle_into_deck
+        shuffle_into_deck(state, owner.player_id, cards)
+    elif instruction.effect == "search":
+        from .card_movement import shuffle_into_deck
+        for card in cards:
+            card.face_up = False
+            card.location = ZoneLocation(zone=CardZone.SET_ASIDE)
+        shuffle_into_deck(state, owner.player_id)
+        state.revealed_card_ids = list(selected)
+        if cards and instruction.install_if_successful and state.turn.occurrences.get("run_success:runner", 0):
+            from .effect_installation import open_install
+            install = SelectCards(player=instruction.player, side=instruction.side, zone="set_aside", effect="install", optional=True)
+            open_install(state, install, state.card_instances.get(window.choice_source_id), window.choice_fact,
+                         definitions, card_ids=list(selected), fallback_hand=True)
+        else:
+            for card in cards:
+                card.location = ZoneLocation(zone=CardZone.HAND, player_id=owner.player_id)
     for instance_id in selected:
         card = state.card_instances[instance_id]
-        if window.selection.effect == "place_advancement":
+        if instruction.effect in {"shuffle", "search"}:
+            continue
+        if instruction.effect == "to_hand":
+            card.location = ZoneLocation(zone=CardZone.HAND, player_id=owner.player_id)
+            card.face_up = None
+        elif window.selection.effect == "place_advancement":
             # CR 1.18.2: counter placement does not emit an advance occurrence.
             card.counters["advancement"] = card.counters.get("advancement", 0) + window.selection.amount
         elif card.installed:

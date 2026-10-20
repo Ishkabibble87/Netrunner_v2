@@ -145,7 +145,7 @@ class GameScreen:
                         if action.get("trash"):
                             cost = self.card_catalog.get(card.get("definition_id"), {}).get("trash_cost", "?")
                             label = f"Trash {card.get('title', 'card')} · {cost} credits"
-                        elif card.get("card_type") == "agenda":
+                        elif card.get("card_type") == "agenda" and not run.get("cannot_steal_or_trash"):
                             label = f"Steal {card['title']}"
                         else:
                             label = "Leave card and finish access"
@@ -157,7 +157,7 @@ class GameScreen:
                         target = f" → {self._server_label(action['server_id'])}" if action.get("server_id") is not None else ""
                         choices.append(MenuChoice(f"Play {card['title']}{target} · {cost} credits", "action", dict(action)))
                 elif action_type == "install_card" and self.submit_action is not None:
-                    card = next((c for c in self.hand if c["instance_id"] == action["card_instance_id"]), None)
+                    card = next((c for c in self.hand + self.state.get("selection_cards", []) if c["instance_id"] == action["card_instance_id"]), None)
                     if card:
                         target = ("your rig" if action.get("server_id") is None else
                                   "new remote" if action["server_id"] == "new_remote" else self._server_label(action["server_id"]))
@@ -170,7 +170,8 @@ class GameScreen:
                         if cost is None:
                             cost = self.card_catalog.get(card["definition_id"], {}).get("install_cost")
                         suffix = f" · {cost} {'credit' if cost == 1 else 'credits'}" if action.get("server_id") is None else ""
-                        choices.append(MenuChoice(f"Install {card['title']} in {target}{replacement} · 1 click{suffix}", "action", dict(action)))
+                        click = "" if self.state.get("effect_install") else " · 1 click"
+                        choices.append(MenuChoice(f"Install {card['title']} in {target}{replacement}{click}{suffix}", "action", dict(action)))
                 elif action_type in {"rez_card", "use_card_ability"} and self.submit_action is not None:
                     card = next((c["card"] for c in self.state.get("installed_cards", [])
                                  if c["instance_id"] == action["card_instance_id"] and c.get("card")), {})
@@ -212,7 +213,11 @@ class GameScreen:
                               if c["instance_id"] in action["card_instance_ids"] and c.get("card")]
                     choices.append(MenuChoice("Trash " + ", ".join(titles) + " to free memory", "action", dict(action)))
                 elif action_type == "select_effect_cards" and self.submit_action is not None:
-                    choices.append(MenuChoice(f"Choose {action['required_count']} cards", "discard", action))
+                    if "card_instance_ids" in action:
+                        choices.append(MenuChoice("Decline installation", "action", dict(action)))
+                    else:
+                        prefix = "Choose up to" if action.get("up_to") else "Choose"
+                        choices.append(MenuChoice(f"{prefix} {action['required_count']} cards", "discard", action))
                 elif action_type == "discard_cards" and self.submit_action is not None:
                     choices.append(MenuChoice(f"Discard {action['required_count']} cards", "discard", action))
                 elif self.submit_action is not None:
@@ -462,6 +467,10 @@ class GameScreen:
 
         line("STATUS", "class:section")
         line(self._status_text())
+        if self.state.get("revealed_cards"):
+            line("Revealed: " + ", ".join(c["title"] for c in self.state["revealed_cards"]))
+        if self.state.get("removed_cards"):
+            line("Removed from game: " + ", ".join(c["title"] for c in self.state["removed_cards"]))
         if self.connection_status is not None:
             line(self.connection_status(), "class:muted")
         line()
@@ -692,7 +701,7 @@ class GameScreen:
             f"{'[x]' if card['instance_id'] in selected else '[ ]'} {self._selection_card_label(card)}",
             "toggle_discard", card["instance_id"],
         ) for card in cards if card["instance_id"] in eligible]
-        if len(selected) == data["action"]["required_count"]:
+        if len(selected) == data["action"]["required_count"] or data["action"].get("up_to"):
             self.level.choices.append(MenuChoice("Confirm selection", "action", {
                 "type": data["action"]["type"], "card_instance_ids": list(selected),
             }))

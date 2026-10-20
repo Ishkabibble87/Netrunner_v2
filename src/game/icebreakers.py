@@ -59,6 +59,12 @@ def validate_paid_ability(state: GameState, player: PlayerState, command: UseCar
     card = state.card_instances.get(command.card_instance_id)
     definition = definitions.get(card.definition_id) if card else None
     ability = next((a for a in definition.paid_abilities if a.ability_id == command.ability_id), None) if definition else None
+    if ability and ability.type == "effects":
+        if (card is None or not card.installed or not card.face_up or not card.rezzed
+                or card.controller_id != player.player_id or command.subroutine_indices or command.server_id is not None
+                or state.window is None or state.window.kind != "paid" or state.window.player is not player.role):
+            raise IllegalCommand("Choose an active paid ability while you have priority")
+        return ability
     if (player.role is not PlayerRole.RUNNER or card is None or not card.installed
             or not card.face_up or card.controller_id != player.player_id or ability is None):
         raise IllegalCommand("Choose an active supported paid ability you control")
@@ -129,6 +135,21 @@ def use_paid_ability(state: GameState, player: PlayerState, command: UseCardAbil
                      definitions: Mapping[str, CardDefinition]) -> None:
     """Pay from the run fund first; boosts outside an encounter expire at once."""
     ability = validate_paid_ability(state, player, command, definitions)
+    if ability.type == "effects":
+        from .card_movement import trash_installed_card
+        from .installation import remove_empty_remotes
+        from .models import CardZone, ZoneLocation
+        from .reactions import resolve_instructions
+        card = state.card_instances[command.card_instance_id]
+        if ability.remove_source_cost:
+            trash_installed_card(state, card)
+            card = state.card_instances[card.instance_id]
+            card.location = ZoneLocation(zone=CardZone.REMOVED_FROM_GAME)
+            if state.run is None:
+                remove_empty_remotes(state)
+        resolve_instructions(state, definitions, player, card, ability.instructions,
+                             ability.ability_id, ability.label, cost_paid=True)
+        return
     spend_runner_credits(state, paid_ability_cost(state, ability))
     card = state.card_instances[command.card_instance_id]
     if ability.virus_cost:

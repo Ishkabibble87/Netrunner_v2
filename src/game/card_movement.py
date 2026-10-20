@@ -1,13 +1,42 @@
 """Shared card-zone movements used by setup and in-game actions."""
 
+from random import SystemRandom
 from uuid import UUID
 
 from .models import CardZone, GameState, ZoneLocation
 
 
+def shuffle_into_deck(state, player_id, cards=(), *, rng=None):
+    """Shuffle returned cards with the deck, maintaining contiguous positions."""
+    deck = [c for c in state.card_instances.values()
+            if c.location.zone is CardZone.DECK and c.owner_id == player_id]
+    deck.extend(c for c in cards if c not in deck)
+    (rng or SystemRandom()).shuffle(deck)
+    for position, card in enumerate(deck, 1):
+        card.location = ZoneLocation(zone=CardZone.DECK, player_id=player_id, deck_position=position)
+        card.face_up = None
+
+
+def reindex_deck(state, player_id):
+    """Close gaps after removing searched or accessed cards from either deck."""
+    deck = sorted((c for c in state.card_instances.values()
+                   if c.location.zone is CardZone.DECK and c.owner_id == player_id),
+                  key=lambda c: c.location.deck_position)
+    for position, card in enumerate(deck, 1):
+        card.location.deck_position = position
+
+
 def trash_installed_card(state, card, *, face_up=True):
     """Trash a source and its hosted descendants, clearing counters and locations."""
     if state.run:
+        run = state.run
+        run.remaining_ice_ids = [i for i in run.remaining_ice_ids if i != card.instance_id]
+        if run.current_ice_id == card.instance_id:
+            run.current_ice_id = None
+            run.phase = "movement"
+            run.strength_boosts = {}
+            run.broken_subroutine_indices = []
+            run.pending_step = "uninstalled_ice"
         # Leaving play makes this installation an invalid delayed-trash target.
         state.run.delayed_reactions = [r for r in state.run.delayed_reactions
                                        if r.card_instance_id != card.instance_id]
