@@ -1,14 +1,15 @@
 # Card Support Tracker
 
-Remaining System Gateway mechanics and the cards that need them. Check off a mechanic as it is supported.
+Remaining System Gateway mechanics and the cards that need them. Check off a mechanic as it is supported. A card appearing in multiple tasks needs each relevant mechanic before it is fully supported. Each task includes API/CLI integration and validation of its affected flow.
 
-1. [ ] **Triggered abilities and usage tracking** — Loup, Zahya Sadeghi, Restoring Humanity, Built to Last, Cookbook, Docklands Pass, Pennyshaver, Nico Campaign, Smartware Distributor, Verbal Plasticity, Red Team, AMAZE Amusements.
-2. [ ] **Hardware and continuous modifiers** — Carnivore, DZMZ Optimizer, Pantograph, T400 Memory Diamond, Superconducting Hub, Precision Design, Echelon, Unity.
-3. [ ] **Hosting and virus counters** — Botulus, Fermenter, Leech, Tranquilizer, Conduit. Cookbook also interacts with virus counters.
-4. [ ] **Conditional breaker abilities** — Carmen, Marjanah, Mayfly.
-5. [ ] **Damage and flatlining** — Urtica Cipher, Clearinghouse, Diviner, Karunā, Tithe, Neurospike, Orbital Superiority.
-6. [ ] **Tags and conditional payments** — Reality Plus, Tomorrow’s Headline, Funhouse, Ping, Pharos, Public Trail, Predictive Planogram, Retribution, Orbital Superiority.
-7. [ ] **Effect choices, targets, and additional costs** — Wildcat Strike, Hansei Review, Predictive Planogram, Seamless Launch, Retribution, Above the Law, Manegarm Skunkworks, Anoetic Void, Carnivore.
-8. [ ] **Search, recursion, and installation during effects** — Mutual Favor, Sprint, Spin Doctor, Longevity Serum, Precision Design, Ansel 1.0, Brân 1.0, Malapert Data Vault, Pantograph.
-9. [ ] **Run modifiers and richer ice subroutines** — Tread Lightly, Whitespace, Ballista, Ansel 1.0, Brân 1.0. Several damage and tag ice also need this.
-10. [ ] **Advancement, scoring, and board changes** — Pharos, Clearinghouse, Urtica Cipher, Luminal Transubstantiation, Tāo Salonga, Send a Message.
+1. [ ] **Turn/action triggers and usage tracking** — Restoring Humanity, Built to Last, Nico Campaign, Smartware Distributor, Verbal Plasticity. Establish shared reaction ordering, optional declines, suspended continuations, and separate first-occurrence and once-per-turn tracking. Add turn-begin/end and action triggers, empty-counter reactions, and Verbal Plasticity's basic-draw replacement without a general interrupt framework.
+2. [ ] **Run triggers and history** — Loup, Zahya Sadeghi, Docklands Pass, Red Team. Builds on task 1. Track servers run this turn, access occurrences, agendas stolen, and originating abilities through run-end reactions before cleanup. Distinguish success from breach timing. Extend existing run instructions for Red Team's central-server restriction and success payout; broader run modifiers remain in task 10.
+3. [ ] **Hardware and continuous modifiers** — Pennyshaver, Carnivore, DZMZ Optimizer, Pantograph, T400 Memory Diamond, Superconducting Hub, Precision Design, Echelon, Unity. Own memory bonuses and the console restriction. Use task 2's successful-run triggers for Pennyshaver's hosted credits and implement its cash-out action here.
+4. [ ] **Hosting and virus counters** — Cookbook, Botulus, Fermenter, Leech, Tranquilizer, Conduit. Own hosted-card lifecycle and virus-counter behavior. Use task 1's install triggers for Cookbook's optional counter placement on the newly installed virus.
+5. [ ] **Conditional breaker abilities** — Carmen, Marjanah, Mayfly.
+6. [ ] **Damage and flatlining** — Urtica Cipher, Clearinghouse, Diviner, Karunā, Tithe, Neurospike, Orbital Superiority.
+7. [ ] **Tags and conditional payments** — AMAZE Amusements, Reality Plus, Tomorrow’s Headline, Funhouse, Ping, Pharos, Public Trail, Predictive Planogram, Retribution, Orbital Superiority. Use task 2's run-end context for AMAZE's stolen-agenda condition; implement its persistent ability after a rezzed copy is trashed during access here.
+8. [ ] **Effect choices, targets, and additional costs** — Wildcat Strike, Hansei Review, Predictive Planogram, Seamless Launch, Retribution, Above the Law, Manegarm Skunkworks, Anoetic Void, Carnivore. Generalize choices and costs beyond the optional trigger declines in task 1.
+9. [ ] **Search, recursion, and installation during effects** — Mutual Favor, Sprint, Spin Doctor, Longevity Serum, Precision Design, Ansel 1.0, Brân 1.0, Malapert Data Vault, Pantograph.
+10. [ ] **Run modifiers and richer ice subroutines** — Tread Lightly, Whitespace, Ballista, Ansel 1.0, Brân 1.0. Several damage and tag ice also need this.
+11. [ ] **Advancement, scoring, and board changes** — Pharos, Clearinghouse, Urtica Cipher, Luminal Transubstantiation, Tāo Salonga, Send a Message. Built to Last's reaction to a basic advance action belongs to task 1.
