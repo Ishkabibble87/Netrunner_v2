@@ -254,6 +254,10 @@ def begin_breach(state: GameState, definitions: Mapping[str, CardDefinition]) ->
     """Open breach reactions separately, before offering any access candidates."""
     run = state.run
     run.access_limit += run.additional_accesses
+    if run.additional_accesses_per_virus:
+        source = state.card_instances.get(run.source_card_id)
+        if source and source.installed and source.location == run.source_location:
+            run.access_limit += source.counters.get("virus", 0)
     run.phase = "breach"
     if run.server_id is CentralServer.ARCHIVES:
         for card in state.card_instances.values():
@@ -265,7 +269,7 @@ def begin_breach(state: GameState, definitions: Mapping[str, CardDefinition]) ->
 
 def start_run(state, server_id, definitions, *, source_event_id=None,
               successful_draw=0, additional_accesses=0, source_card_id=None,
-              source_ability_id=None, successful_take_credits=0):
+              source_ability_id=None, successful_take_credits=0, additional_accesses_per_virus=False):
     """Enter the same run timing structure from a basic action or event."""
     source_card_id = source_card_id or source_event_id
     state.run = RunState(server_id=server_id, source_event_id=source_event_id,
@@ -273,6 +277,7 @@ def start_run(state, server_id, definitions, *, source_event_id=None,
                          source_location=state.card_instances[source_card_id].location.model_copy(deep=True) if source_card_id else None,
                          successful_take_credits=successful_take_credits,
                          successful_draw=successful_draw, additional_accesses=additional_accesses,
+                         additional_accesses_per_virus=additional_accesses_per_virus,
                          bad_publicity_credits=state.corp.bad_publicity, phase="initiation")
     state.turn.servers_run.add(state.run.server_id)
     ice = sorted((c for c in state.card_instances.values() if c.installed and c.location.server

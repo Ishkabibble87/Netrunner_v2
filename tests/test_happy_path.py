@@ -75,6 +75,7 @@ class GameProgressTests(unittest.TestCase):
         self.run_from_events(session)
         self.use_run_triggered_cards(session)
         self.use_turn_triggered_economy(session)
+        self.use_hosted_viruses(session)
 
     def select_and_parse_deck(self) -> DeckSelection:
         deck = load_nrdb_deck(
@@ -99,6 +100,12 @@ class GameProgressTests(unittest.TestCase):
 
     def select_opponent_and_start_game(self, deck: DeckSelection) -> GameSession:
         opponent = load_opponent_profiles(self.cards)["system-gateway-training"]
+        # Add real virus cards to this scenario's deck without altering reusable decks.
+        selections = dict(opponent.deck_selections)
+        runner_deck = selections[PlayerRole.RUNNER]
+        selections[PlayerRole.RUNNER] = runner_deck.model_copy(update={
+            "card_counts": {**runner_deck.card_counts, "30009": 1, "30004": 1, "30007": 1}})
+        opponent = opponent.model_copy(update={"deck_selections": selections})
         player_id = uuid4()
         game = create_ai_game(
             player_id=player_id,
@@ -273,7 +280,9 @@ class GameProgressTests(unittest.TestCase):
         titles = ["Hedge Fund", "Government Subsidy", "Offworld Office", "Regolith Mining License",
                   "Sure Gamble", "Creative Commission", "Telework Contract", "VRcation", "Cleaver", "Palisade", "Jailbreak", "Overclock", "Docklands Pass", "Red Team", "Pennyshaver"]
         codes = [next(code for code, card in self.cards.items() if card.title == title) for title in titles]
-        codes += sorted(set(selection.card_counts) - set(codes))
+        viruses = ["30009", "30004", "30007"]
+        codes += sorted(set(selection.card_counts) - set(codes) - set(viruses))
+        codes += viruses
         return [code for code in codes for _ in range(selection.card_counts.get(code, 0))]
 
     def install_advance_and_score(self, session):
@@ -791,6 +800,75 @@ class GameProgressTests(unittest.TestCase):
                 submit(runner, GainCredit())
         action_for_runner()
         self.assertEqual(session.state.card_instances[smartware].counters["credit"], 2)
+
+    def use_hosted_viruses(self, session):
+        """Continue the same game through virus installation, a run, and a trash payout."""
+        runner = PlayerRole.RUNNER
+        wanted = {"Cookbook", "Botulus", "Fermenter"}
+
+        def submit(role, command):
+            player = session.state.corp if role is PlayerRole.CORP else session.state.runner
+            self.sessions.submit(session.state.game_id, session.player_tokens[player.player_id], command,
+                                 card_definitions=self.cards)
+
+        def settle():
+            for _ in range(150):
+                state = session.state
+                if state.window:
+                    player = state.corp if state.window.player is PlayerRole.CORP else state.runner
+                    actions = legal_actions_for(state, player.player_id, self.cards)
+                    submit(player.role, actions[0] if state.window.kind == "reaction" else PassPriority())
+                elif state.turn.phase is TurnPhase.DISCARD:
+                    player = state.corp if state.turn.active_player is PlayerRole.CORP else state.runner
+                    selection, = legal_actions_for(state, player.player_id, self.cards)
+                    choices = sorted(selection.eligible_card_instance_ids,
+                                     key=lambda i: self.cards[state.card_instances[i].definition_id].title in wanted)
+                    submit(player.role, DiscardCards(tuple(choices[:selection.required_count])))
+                elif state.turn.active_player is runner:
+                    return
+                else:
+                    submit(PlayerRole.CORP, GainCredit())
+            self.fail("Runner action did not arrive")
+
+        for _ in range(30):
+            settle()
+            found = {self.cards[c.definition_id].title: c.instance_id for c in
+                     self.cards_in_zone(session.state, session.state.runner.player_id, CardZone.HAND).values()
+                     if self.cards[c.definition_id].title in wanted}
+            if wanted <= found.keys():
+                break
+            submit(runner, DrawCard())
+        self.assertEqual(found.keys(), wanted)
+        submit(runner, InstallCard(found["Cookbook"]))
+        settle()
+        host = next(c for c in session.state.card_instances.values()
+                    if c.installed and self.cards[c.definition_id].title == "Palisade")
+        botulus = found["Botulus"]
+        submit(runner, InstallCard(botulus, host_card_instance_id=host.instance_id))
+        settle()
+        self.assertEqual(session.state.card_instances[botulus].counters["virus"], 2)
+        submit(runner, RunServer(host.location.server.server_id))
+        for _ in range(20):
+            if session.state.run.phase == "encounter":
+                break
+            submit(session.state.window.player, PassPriority())
+        submit(runner, UseCardAbility(botulus, "break_host", (0,)))
+        self.assertEqual(session.state.run.broken_subroutine_indices, [0])
+        self.assertEqual(session.state.card_instances[botulus].counters["virus"], 1)
+        settle()
+        submit(runner, ContinueRun())
+        settle()
+        self.assertIsNone(session.state.run)
+        fermenter = found["Fermenter"]
+        submit(runner, InstallCard(fermenter))
+        settle()
+        count = session.state.card_instances[fermenter].counters["virus"]
+        self.assertGreaterEqual(count, 2)
+        before = session.state.runner.credits
+        submit(runner, UseCardAbility(fermenter, "cash_out"))
+        self.assertEqual(session.state.runner.credits, before + 2 * count)
+        self.assertFalse(session.state.card_instances[fermenter].installed)
+        self.assertEqual(session.state.card_instances[fermenter].counters, {})
 
     @staticmethod
     def cards_in_zone(state, player_id, zone):

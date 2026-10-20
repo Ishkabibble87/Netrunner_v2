@@ -54,6 +54,13 @@ def validate_install(state: GameState, player: PlayerState, command: InstallCard
             raise IllegalCommand("Choose a supported resource, program, or hardware from your hand")
         if command.server_id is not None:
             raise IllegalCommand("Runner cards have no server destination")
+        host = state.card_instances.get(command.host_card_instance_id)
+        if definition.install_on_ice:
+            if (host is None or not host.installed or not host.location.server
+                    or host.location.server.area is not ServerArea.ICE):
+                raise IllegalCommand("Choose an installed piece of ice as host")
+        elif command.host_card_instance_id is not None:
+            raise IllegalCommand("This card cannot be installed on a host")
         trash_ids = set(command.trash_card_instance_ids)
         programs = installed_programs(state, player, definitions)
         if (len(trash_ids) != len(command.trash_card_instance_ids)
@@ -75,6 +82,8 @@ def validate_install(state: GameState, player: PlayerState, command: InstallCard
         raise IllegalCommand("Choose an installable Corp card from your hand")
     if definition.card_type is CardType.AGENDA and definition.score_instructions is None:
         raise IllegalCommand("This agenda's abilities are not implemented")
+    if command.host_card_instance_id is not None:
+        raise IllegalCommand("Corp installs do not choose a host")
     target = command.server_id
     if target != "new_remote" and target not in state.servers:
         raise IllegalCommand("Choose an existing server or a new remote")
@@ -109,7 +118,7 @@ def install_card(state: GameState, player: PlayerState, command: InstallCard,
         player.clicks_remaining -= 1
         card = state.card_instances[command.card_instance_id].model_copy(update={
             "installed": True, "rezzed": False, "face_up": True,
-            "location": ZoneLocation(zone=CardZone.PLAY_AREA),
+            "location": ZoneLocation(zone=CardZone.PLAY_AREA, host_card_instance_id=command.host_card_instance_id),
         })
         state.card_instances[card.instance_id] = card
         if "Console" in definition.subtypes:
@@ -131,10 +140,7 @@ def install_card(state: GameState, player: PlayerState, command: InstallCard,
         state.servers.append(target)
     for instance_id in command.trash_card_instance_ids:
         card = state.card_instances[instance_id]
-        state.card_instances[instance_id] = card.model_copy(update={
-            "installed": False, "rezzed": False, "counters": {}, "loaded_counter_types": set(), "ability_last_used_turn": {},
-            "controller_id": None,
-            "location": ZoneLocation(zone=CardZone.DISCARD_PILE, player_id=player.player_id)})
+        trash_installed_card(state, card, face_up=bool(card.face_up))
     ice = sorted((c for c in state.card_instances.values() if c.installed and c.location.server
                   and c.location.server.server_id == target and c.location.server.area is ServerArea.ICE),
                  key=lambda c: c.location.server.ice_distance_from_server)

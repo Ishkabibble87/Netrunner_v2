@@ -1,4 +1,177 @@
 {
+  "30004": {
+    "install_instructions": [
+      {
+        "type": "place_virus_counters"
+      }
+    ],
+    "triggered_abilities": [
+      {
+        "ability_id": "turn_virus",
+        "label": "Place 1 virus counter",
+        "trigger": "turn_begin",
+        "instructions": [
+          {
+            "type": "place_virus_counters"
+          }
+        ]
+      }
+    ],
+    "install_on_ice": true,
+    "paid_abilities": [
+      {
+        "ability_id": "break_host",
+        "label": "Spend 1 virus counter: break 1 subroutine on host ice",
+        "type": "break_host_subroutine",
+        "credit_cost": 0,
+        "virus_cost": 1,
+        "amount": 1
+      }
+    ]
+  },
+  "30007": {
+    "install_instructions": [
+      {
+        "type": "place_virus_counters"
+      }
+    ],
+    "triggered_abilities": [
+      {
+        "ability_id": "turn_virus",
+        "label": "Place 1 virus counter",
+        "trigger": "turn_begin",
+        "instructions": [
+          {
+            "type": "place_virus_counters"
+          }
+        ]
+      }
+    ],
+    "action_abilities": [
+      {
+        "ability_id": "cash_out",
+        "label": "Trash: gain 2 credits per hosted virus counter",
+        "trash_cost": true,
+        "instructions": [
+          {
+            "type": "gain_credits_per_virus",
+            "amount": 2
+          }
+        ]
+      }
+    ]
+  },
+  "30008": {
+    "install_instructions": [],
+    "triggered_abilities": [
+      {
+        "ability_id": "central_virus",
+        "label": "Place 1 virus counter",
+        "trigger": "run_success",
+        "instructions": [
+          {
+            "type": "place_virus_counters"
+          }
+        ],
+        "servers": [
+          "hq",
+          "rd",
+          "archives"
+        ]
+      }
+    ],
+    "paid_abilities": [
+      {
+        "ability_id": "lower_strength",
+        "label": "Spend 1 virus counter: encountered ice gets -1 strength",
+        "type": "lower_ice_strength",
+        "credit_cost": 0,
+        "virus_cost": 1,
+        "amount": 1
+      }
+    ]
+  },
+  "30009": {
+    "install_instructions": [],
+    "triggered_abilities": [
+      {
+        "ability_id": "cookbook_virus",
+        "label": "Place 1 virus counter on the installed virus",
+        "trigger": "install",
+        "instructions": [
+          {
+            "type": "place_virus_counters",
+            "target": "installed_card"
+          }
+        ],
+        "condition": "installed_virus",
+        "optional": true
+      }
+    ]
+  },
+  "30017": {
+    "install_instructions": [
+      {
+        "type": "place_virus_counters"
+      },
+      {
+        "type": "derez_host",
+        "minimum_virus_counters": 3
+      }
+    ],
+    "triggered_abilities": [
+      {
+        "ability_id": "turn_virus",
+        "label": "Place 1 virus counter and check host derez",
+        "trigger": "turn_begin",
+        "instructions": [
+          {
+            "type": "place_virus_counters"
+          },
+          {
+            "type": "derez_host",
+            "minimum_virus_counters": 3
+          }
+        ]
+      }
+    ],
+    "install_on_ice": true
+  },
+  "30024": {
+    "install_instructions": [],
+    "triggered_abilities": [
+      {
+        "ability_id": "rd_virus",
+        "label": "Place 1 virus counter",
+        "trigger": "run_end",
+        "instructions": [
+          {
+            "type": "place_virus_counters"
+          }
+        ],
+        "servers": [
+          "rd"
+        ],
+        "condition": "successful_run",
+        "optional": true
+      }
+    ],
+    "action_abilities": [
+      {
+        "ability_id": "run_rd",
+        "label": "Run R&D; access 1 additional card per hosted virus counter",
+        "instructions": [
+          {
+            "type": "initiate_run",
+            "servers": [
+              "rd"
+            ],
+            "additional_accesses_per_virus": true
+          }
+        ]
+      }
+    ]
+  },
   "30003": {
     "install_instructions": [],
     "memory_bonus": 1

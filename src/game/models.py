@@ -281,6 +281,7 @@ class PendingReaction(DomainModel):
     player: PlayerRole
     fact: RuleFact
     source_location: ZoneLocation
+    set_aside_counters: dict[str, NonNegativeCounter] = Field(default_factory=dict)
     instructions: tuple[PlayInstruction, ...]
     optional: bool = False
     once_per_turn: bool = False
@@ -331,10 +332,11 @@ class RunState(DomainModel):
     remaining_ice_ids: list[UUID] = Field(default_factory=list)
     current_ice_id: UUID | None = None
     broken_subroutine_indices: list[NonNegativeCounter] = Field(default_factory=list)
-    strength_boosts: dict[UUID, NonNegativeCounter] = Field(default_factory=dict)
+    strength_boosts: dict[UUID, int] = Field(default_factory=dict)
     source_event_id: UUID | None = None
     successful_draw: int = Field(default=0, ge=0)
     additional_accesses: int = Field(default=0, ge=0)
+    additional_accesses_per_virus: bool = False
     successful: bool = False
     access_limit: int = Field(default=1, ge=1)
     central_accesses: int = Field(default=0, ge=0)

@@ -6,11 +6,14 @@ helper as basic actions; no printed prose is interpreted at runtime.
 
 from content.cards.models import (
     AdditionalAccesses,
+    DerezHost,
     DrawCards,
     GainAccessCredits,
     GainCredits,
+    GainCreditsPerVirus,
     LoadCredits,
     LoseClickIfAny,
+    PlaceVirusCounters,
     PlayInstruction,
     TakeCredits,
     TrashSource,
@@ -27,9 +30,24 @@ from .models import (
 
 
 def resolve_effect(state: GameState, player: PlayerState, instruction: PlayInstruction,
-                   source: CardInstance | None = None, fact: RuleFact | None = None) -> None:
+                   source: CardInstance | None = None, fact: RuleFact | None = None,
+                   *, set_aside_counters: dict[str, int] | None = None) -> None:
     """Resolve one effect fully before the next instruction or turn transition."""
-    if isinstance(instruction, TrashSource):
+    if isinstance(instruction, PlaceVirusCounters):
+        target = source if instruction.target == "self" else (
+            state.card_instances.get(fact.card_instance_id) if fact else None)
+        if target is not None and target.installed:
+            target.counters["virus"] = target.counters.get("virus", 0) + instruction.amount
+    elif isinstance(instruction, DerezHost):
+        if source is not None and source.counters.get("virus", 0) >= instruction.minimum_virus_counters:
+            host = state.card_instances.get(source.location.host_card_instance_id)
+            if host is not None and host.installed and host.rezzed:
+                host.rezzed = False
+                host.face_up = False
+    elif isinstance(instruction, GainCreditsPerVirus):
+        counters = set_aside_counters if set_aside_counters is not None else (source.counters if source else {})
+        player.credits += instruction.amount * counters.get("virus", 0)
+    elif isinstance(instruction, TrashSource):
         if source is not None:
             trash_installed_card(state, source)
             if state.run is None:

@@ -1,4 +1,4 @@
-"""Validate and resolve the first authored paid breaker abilities (CR 3.9.5).
+"""Validate and resolve authored breaker and virus encounter abilities (CR 3.9.5).
 
 All costs and targets are validated before mutation. Strength boosts and broken
 subroutines live on the encounter, not on permanent card instances.
@@ -54,6 +54,8 @@ def validate_paid_ability(state: GameState, player: PlayerState, command: UseCar
     funds = runner_funds(state)
     if funds < ability.credit_cost:
         raise IllegalCommand("Not enough credits to use this ability")
+    if card.counters.get("virus", 0) < ability.virus_cost:
+        raise IllegalCommand("Not enough hosted virus counters")
     targets = command.subroutine_indices
     if ability.type == "boost_strength":
         if targets:
@@ -64,7 +66,14 @@ def validate_paid_ability(state: GameState, player: PlayerState, command: UseCar
         raise IllegalCommand("Interface abilities require an ice encounter")
     ice = state.card_instances[run.current_ice_id]
     ice_definition = definitions[ice.definition_id]
-    if ("Icebreaker" not in definition.subtypes or ability.subtype not in ice_definition.subtypes
+    if ability.type == "lower_ice_strength":
+        if targets:
+            raise IllegalCommand("Strength abilities do not target subroutines")
+        return ability
+    if ability.type == "break_host_subroutine":
+        if card.location.host_card_instance_id != ice.instance_id:
+            raise IllegalCommand("This ability can only break subroutines on its host ice")
+    elif ("Icebreaker" not in definition.subtypes or ability.subtype not in ice_definition.subtypes
             or effective_strength(state, card, definition, definitions) < effective_strength(state, ice, ice_definition, definitions)):
         raise IllegalCommand("The icebreaker must match the ice subtype and strength")
     if (not targets or len(targets) > ability.amount or len(set(targets)) != len(targets)
@@ -83,7 +92,7 @@ def paid_actions(state: GameState, player: PlayerState,
         definition = definitions.get(card.definition_id)
         for ability in definition.paid_abilities if definition else ():
             selections = [()]
-            if ability.type == "break_subroutines":
+            if ability.type in {"break_subroutines", "break_host_subroutine"}:
                 if not run or run.phase != "encounter":
                     continue
                 ice_definition = definitions[state.card_instances[run.current_ice_id].definition_id]
@@ -106,8 +115,15 @@ def use_paid_ability(state: GameState, player: PlayerState, command: UseCardAbil
     """Pay from the run fund first; boosts outside an encounter expire at once."""
     ability = validate_paid_ability(state, player, command, definitions)
     spend_runner_credits(state, ability.credit_cost)
-    if ability.type == "break_subroutines":
+    card = state.card_instances[command.card_instance_id]
+    if ability.virus_cost:
+        card.counters["virus"] -= ability.virus_cost
+    if ability.type in {"break_subroutines", "break_host_subroutine"}:
         state.run.broken_subroutine_indices.extend(command.subroutine_indices)
+    elif ability.type == "lower_ice_strength":
+        boosts = state.run.strength_boosts
+        ice_id = state.run.current_ice_id
+        boosts[ice_id] = boosts.get(ice_id, 0) - ability.amount
     elif state.run and state.run.phase == "encounter":
         boosts = state.run.strength_boosts
         card = state.card_instances[command.card_instance_id]
