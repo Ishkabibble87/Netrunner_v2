@@ -10,6 +10,7 @@ from itertools import combinations
 from content.cards.models import CardDefinition, PaidAbility, TrashSource
 
 from .commands import UseCardAbility
+from .history import boundary
 from .models import CardInstance, GameState, PlayerRole, PlayerState, RuleFact
 from .modifiers import installed_icebreaker_count
 from .payments import runner_funds, spend_runner_credits
@@ -153,6 +154,7 @@ def paid_actions(state: GameState, player: PlayerState,
     return choices
 
 
+@boundary
 def use_paid_ability(state: GameState, player: PlayerState, command: UseCardAbility,
                      definitions: Mapping[str, CardDefinition]) -> None:
     """Pay from the run fund first; boosts outside an encounter expire at once."""

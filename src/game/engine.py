@@ -41,6 +41,7 @@ from .commands import (
     TrashResource,
     UseCardAbility,
 )
+from .history import record_command
 from .icebreakers import paid_actions, use_paid_ability
 from .installation import (
     advanceable_card,
@@ -256,6 +257,7 @@ def legal_actions_for(
     return tuple(actions)
 
 
+@record_command
 def apply_command(
     state: GameState, player_id: UUID, command: GameCommand,
     card_definitions: Mapping[str, CardDefinition] | None = None,

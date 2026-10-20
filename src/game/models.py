@@ -248,6 +248,7 @@ class TurnState(DomainModel):
     """Turn-scoped rules history and occurrences; clicks live with each player."""
 
     number: int = Field(ge=1)
+    history_start_id: UUID | None = None
     active_player: PlayerRole
     phase: TurnPhase
     step: Literal["start", "turn_begin", "mandatory_draw", "before_action", "action", "discard", "end", "next_turn"] = "action"
@@ -306,6 +307,32 @@ class EffectContinuation(DomainModel):
     next_instruction: int = 0
 
 
+class HistoryDetail(DomainModel):
+    """One viewer's immutable description, without trackable hidden-card IDs."""
+
+    text: str
+    field: str | None = None
+    before: int | None = None
+    after: int | None = None
+    definition_id: str | None = None
+    title: str | None = None
+
+
+class HistoryEntry(DomainModel):
+    """A chronological occurrence and its causal position in a player action."""
+
+    entry_id: UUID = Field(default_factory=uuid4)
+    sequence: int
+    turn_number: int | None = None
+    turn_player: PlayerRole | None = None
+    group_id: UUID
+    parent_id: UUID | None = None
+    run_id: UUID | None = None
+    actor: PlayerRole | None = None
+    kind: str
+    details: dict[PlayerRole, HistoryDetail]
+
+
 class PriorityWindow(DomainModel):
     """Paid priority, a reaction batch, or an authored effect decision.
 
@@ -316,6 +343,7 @@ class PriorityWindow(DomainModel):
     """
 
     kind: Literal["paid", "reaction", "choice", "target", "install"]
+    history_parent_id: UUID | None = None
     choice: ChooseEffect | None = None
     choice_source_id: UUID | None = None
     choice_fact: RuleFact | None = None
@@ -344,6 +372,7 @@ class RunState(DomainModel):
     """
 
     run_id: UUID = Field(default_factory=uuid4)
+    history_parent_id: UUID | None = None
     source_card_id: UUID | None = None
     source_ability_id: str | None = None
     source_location: ZoneLocation | None = None
@@ -379,6 +408,9 @@ class GameState(DomainModel):
     """Authoritative state from opening-hand decisions through play."""
 
     game_id: UUID
+    history: list[HistoryEntry] = Field(default_factory=list)
+    history_group_id: UUID | None = None
+    history_parent_id: UUID | None = None
     corp: PlayerState
     runner: PlayerState
     setup: SetupState = Field(default_factory=SetupState)

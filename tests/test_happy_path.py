@@ -85,6 +85,20 @@ class GameProgressTests(unittest.TestCase):
         self.recycle_cards_with_sprint(session)
         self.advance_pharos(session)
         self.suffer_damage_and_flatline(session)
+        self.inspect_game_history(session)
+
+    def inspect_game_history(self, session):
+        """The same game's history spans mechanics without becoming rule state."""
+        entries = session.state.history
+        self.assertEqual([e.sequence for e in entries], list(range(1, len(entries) + 1)))
+        ids = {e.entry_id for e in entries}
+        self.assertEqual(len(ids), len(entries))
+        self.assertTrue(all(e.group_id in ids and (e.parent_id is None or e.parent_id in ids) for e in entries))
+        self.assertTrue({"command", "effect", "resource", "counter", "movement", "run", "subroutine", "game_end"}
+                        <= {e.kind for e in entries})
+        for run_id in {e.run_id for e in entries if e.run_id is not None}:
+            self.assertEqual(len({e.group_id for e in entries if e.run_id == run_id}), 1)
+        self.assertEqual(entries[-1].kind, "game_end")
 
     def select_and_parse_deck(self) -> DeckSelection:
         deck = load_nrdb_deck(

@@ -8,6 +8,7 @@ materializing every combination; submissions are revalidated on a private copy.
 from content.cards.models import EffectOption, SelectCards
 
 from .commands import CardSelection, ChooseEffectOption
+from .history import boundary
 from .models import CardZone, GameState, PlayerRole, PriorityWindow, ZoneLocation
 from .payments import runner_funds, spend_runner_credits
 from .setup import IllegalCommand
@@ -80,7 +81,7 @@ def choice_options(state: GameState, definitions):
 def open_choice(state, instruction, source, fact, player):
     parent = state.window.resolving if state.window and state.window.kind == "reaction" else None
     state.suspended_windows.append(state.window)
-    state.window = PriorityWindow(kind="choice", player=PlayerRole(instruction.player),
+    state.window = PriorityWindow(history_parent_id=state.history_parent_id, kind="choice", player=PlayerRole(instruction.player),
         choice=instruction, choice_source_id=source.instance_id, choice_fact=fact,
         choice_effect_player=player.role,
         choice_ability_id=parent.reaction.ability_id if parent and parent.reaction.once_per_turn else None,
@@ -101,7 +102,7 @@ def open_selection(state, instruction, source, fact, definitions):
             shuffle_into_deck(state, owner.player_id)
         return  # CR 1.15.2e: resolve as much as possible if no targets exist.
     state.suspended_windows.append(state.window)
-    state.window = PriorityWindow(kind="target", player=PlayerRole(instruction.player),
+    state.window = PriorityWindow(history_parent_id=state.history_parent_id, kind="target", player=PlayerRole(instruction.player),
         selection=instruction, choice_source_id=source.instance_id if source else None, choice_fact=fact)
 
 
@@ -112,6 +113,7 @@ def _trash_hand(state, instance_ids, role):
         card.location = ZoneLocation(zone=CardZone.DISCARD_PILE, player_id=card.owner_id)
 
 
+@boundary
 def resolve_selection(state, definitions, command):
     """Revalidate the whole set before paying a cost or changing any target."""
     from .card_movement import trash_installed_card
@@ -180,6 +182,7 @@ def resolve_selection(state, definitions, command):
     settle_reactions(state, definitions)
 
 
+@boundary
 def resolve_choice(state, definitions, command: ChooseEffectOption, *, payment_cards=None):
     """Resolve one mode or pay a complete cost, retaining the effect controller."""
     from .reactions import checkpoint, resolve_instructions, settle_reactions
@@ -192,7 +195,7 @@ def resolve_choice(state, definitions, command: ChooseEffectOption, *, payment_c
         instruction = SelectCards(player=window.player.value, side=window.player.value,
                                   zone="hand", count=option.trash_hand_cost, optional=True)
         state.suspended_windows.append(window)
-        state.window = PriorityWindow(kind="target", player=window.player, selection=instruction,
+        state.window = PriorityWindow(history_parent_id=state.history_parent_id, kind="target", player=window.player, selection=instruction,
                                       payment_option=option, choice_source_id=window.choice_source_id)
         return
     if option.trash_hand_cost:

@@ -17,6 +17,7 @@ from content.cards.models import (
 
 from .card_movement import trash_installed_card
 from .commands import UseCardAbility
+from .history import boundary
 from .models import (
     CardInstance,
     GameState,
@@ -69,6 +70,7 @@ def validate_rez(state: GameState, player: PlayerState, instance_id: UUID,
     return card, definition
 
 
+@boundary
 def rez_card(state, player, instance_id, definitions, *, during_effect=False, ignore_costs=False):
     """Share payment, activation and rez reactions with effect-directed rezzing."""
     card, definition = validate_rez(state, player, instance_id, definitions,
@@ -114,6 +116,7 @@ def validate_ability(state: GameState, player: PlayerState, command: UseCardAbil
     return card, definition, ability
 
 
+@boundary
 def use_ability(state: GameState, player: PlayerState, command: UseCardAbility,
                 definitions: Mapping[str, CardDefinition]) -> None:
     """Pay an action once, then resolve its effects or enter its run timing."""
