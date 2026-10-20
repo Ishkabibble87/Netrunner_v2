@@ -168,6 +168,8 @@ class PassPriorityCommandRequest(ApiModel):
 class ResolveReactionCommandRequest(ApiModel):
     type: Literal["resolve_reaction"]
     card_instance_id: UUID
+    reaction_id: UUID | None = None
+    decline: bool = False
 
 
 class RunServerCommandRequest(ApiModel):
@@ -247,7 +249,7 @@ def game_command_from_request(request: PlayerCommandRequest) -> GameCommand:
     if isinstance(request, PassPriorityCommandRequest):
         return PassPriority()
     if isinstance(request, ResolveReactionCommandRequest):
-        return ResolveReaction(request.card_instance_id)
+        return ResolveReaction(request.card_instance_id, request.reaction_id, request.decline)
     if isinstance(request, DiscardCardsCommandRequest):
         return DiscardCards(tuple(request.card_instance_ids))
     if isinstance(request, MulliganCommandRequest):
@@ -292,7 +294,8 @@ def command_request_from_game(command: GameCommand | DiscardSelection) -> LegalA
     if isinstance(command, PassPriority):
         return PassPriorityCommandRequest(type="pass_priority")
     if isinstance(command, ResolveReaction):
-        return ResolveReactionCommandRequest(type="resolve_reaction", card_instance_id=command.card_instance_id)
+        return ResolveReactionCommandRequest(type="resolve_reaction", card_instance_id=command.card_instance_id,
+            reaction_id=command.reaction_id, decline=command.decline)
     if isinstance(command, DiscardSelection):
         return DiscardCardsAction(eligible_card_instance_ids=list(command.eligible_card_instance_ids),
                                  required_count=command.required_count)
@@ -401,6 +404,15 @@ class RunView(ApiModel):
     access_note: str = "Card-specific access abilities are not implemented yet."
 
 
+class ReactionView(ApiModel):
+    """Reaction labels visible only to the player choosing their next ability."""
+
+    reaction_id: UUID
+    card_instance_id: UUID
+    label: str
+    optional: bool
+
+
 class InitialGameView(ApiModel):
     """Current state projection with private cards and legal actions for one viewer."""
 
@@ -417,6 +429,7 @@ class InitialGameView(ApiModel):
     you: OwnPlayerView
     opponent: OpponentView
     servers: list[str | int]
+    reactions: list[ReactionView] = Field(default_factory=list)
     installed_cards: list[InstalledCardView]
     run: RunView | None = None
 
@@ -518,6 +531,10 @@ class InitialGameView(ApiModel):
                     if state.run.current_card_id in visible_ids else None,
                 accessed_cards=[card_view(i) for i in dict.fromkeys(state.run.visible_card_ids) if i in visible_ids],
             ) if state.run else None,
+            reactions=[ReactionView(reaction_id=r.reaction_id, card_instance_id=r.card_instance_id,
+                label=r.label, optional=r.optional) for r in state.window.reactions
+                if r.player is you.role] if state.window and state.window.kind == "reaction"
+                and state.window.player is you.role else [],
             game_id=state.game_id,
             viewer_player_id=viewer_player_id,
             viewer_role=you.role,
@@ -614,4 +631,4 @@ class CardCatalogEntry(ApiModel):
     @classmethod
     def from_definition(cls, definition: CardDefinition) -> "CardCatalogEntry":
         return cls(**definition.model_dump(exclude={"play_instructions", "score_instructions", "install_instructions",
-                                                   "rez_instructions", "action_abilities", "trash_when_empty", "paid_abilities", "subroutines", "remote_strength_bonus"}))
+                                                   "rez_instructions", "action_abilities", "trash_when_empty", "paid_abilities", "subroutines", "remote_strength_bonus", "triggered_abilities", "first_basic_draw_amount"}))

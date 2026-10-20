@@ -11,6 +11,7 @@ from .models import (
     GameState,
     PlayerRole,
     PlayerState,
+    RuleFact,
     TurnPhase,
     TurnState,
 )
@@ -31,12 +32,23 @@ def hand_cards(state: GameState, player: PlayerState):
 
 def advance_turn(state: GameState, definitions=None) -> None:
     """Mutate a working snapshot through automatic steps, stopping at a decision."""
+    from .reactions import collect_turn_end, emit_fact
+
     while state.winner is None and state.turn is not None and state.window is None and state.run is None:
+        if state.pending_action_fact is not None:
+            fact = state.pending_action_fact
+            state.pending_action_fact = None
+            emit_fact(state, definitions or {}, fact)
+            if state.window is not None:
+                return
         turn = state.turn
         player = state.corp if turn.active_player is PlayerRole.CORP else state.runner
         if turn.step == "start":
-            turn.step = "mandatory_draw" if player.role is PlayerRole.CORP else "before_action"
+            turn.step = "turn_begin"
             open_paid_window(state, definitions=definitions)  # CR 5.6.1b / 5.7.1b, before turn-begin steps.
+        elif turn.step == "turn_begin":
+            turn.step = "mandatory_draw" if player.role is PlayerRole.CORP else "before_action"
+            emit_fact(state, definitions or {}, RuleFact(type="turn_begin", player=player.role))
         elif turn.step == "mandatory_draw":
             if not draw_from_deck(state, player.player_id, 1):
                 state.winner = PlayerRole.RUNNER
@@ -60,8 +72,12 @@ def advance_turn(state: GameState, definitions=None) -> None:
                 return
             turn.step = "end"
             open_paid_window(state, definitions=definitions)  # CR 5.6.3b / 5.7.2b, after discarding.
-        else:
+        elif turn.step == "end":
             player.clicks_remaining = 0
+            turn.step = "next_turn"
+            # Both conditions are met at the same timing point (CR 5.6.3d/5.7.2d).
+            collect_turn_end(state, definitions or {}, player.role)
+        else:
             next_role = PlayerRole.RUNNER if player.role is PlayerRole.CORP else PlayerRole.CORP
             state.turn = TurnState(number=turn.number + 1, active_player=next_role,
                                    phase=TurnPhase.DRAW if next_role is PlayerRole.CORP else TurnPhase.ACTION,

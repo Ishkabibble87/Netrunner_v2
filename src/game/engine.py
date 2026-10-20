@@ -35,7 +35,6 @@ from .commands import (
     ScoreAgenda,
     UseCardAbility,
 )
-from .effects import resolve_effect
 from .icebreakers import paid_actions, use_paid_ability
 from .installation import (
     agenda_points,
@@ -58,11 +57,12 @@ from .models import (
     PendingDecision,
     PlayerRole,
     PlayerState,
-    PriorityWindow,
+    RuleFact,
     TurnPhase,
     ZoneLocation,
 )
 from .priority import pass_priority
+from .reactions import basic_draw_amount, emit_fact, pass_reactions, resolve_reaction
 from .runs import resolve_run_command, resume_run, run_actions, runnable_servers
 from .setup import IllegalCommand, choose_mulligan
 from .turns import advance_turn, hand_cards, maximum_hand_size
@@ -97,7 +97,13 @@ def legal_actions_for(
         if state.window.player is not player.role:
             return ()
         if state.window.kind == "reaction":
-            return tuple(ResolveReaction(i) for i in state.window.pending_card_ids)
+            reactions = [r for r in state.window.reactions if r.player is player.role]
+            actions = [ResolveReaction(r.card_instance_id, r.reaction_id) for r in reactions]
+            actions.extend(ResolveReaction(r.card_instance_id, r.reaction_id, decline=True)
+                           for r in reactions if r.optional)
+            if all(r.optional for r in reactions):
+                actions.append(PassPriority())
+            return tuple(actions)
         actions = paid_actions(state, player, definitions)
         for card in state.card_instances.values():
             try:
@@ -224,6 +230,8 @@ def apply_command(
             raise IllegalCommand("Finish the current run before taking another action")
         result = state.model_copy(deep=True)
         resolve_run_command(result, command, card_definitions or {})
+        if isinstance(command, RunServer):
+            result.pending_action_fact = RuleFact(type="action", player=player.role, action="run")
         result.turn.step = "before_action"
         advance_turn(result, card_definitions)
         return GameState.model_validate(result.model_dump())
@@ -236,19 +244,22 @@ def apply_command(
         if not isinstance(command, PassPriority) and result.window.kind == "paid":
             result.window.opponent_passed = False
         if isinstance(command, PassPriority):
-            if result.window.kind != "paid":
-                raise IllegalCommand("Resolve mandatory reactions before passing")
-            continuation = pass_priority(result, definitions)
-            if continuation is not None:
-                resume_run(result, continuation, definitions)
+            if result.window.kind == "reaction":
+                pass_reactions(result, definitions)
+            else:
+                continuation = pass_priority(result, definitions)
+                if continuation is not None:
+                    resume_run(result, continuation, definitions)
         elif isinstance(command, UseCardAbility):
+            if result.window.kind != "paid":
+                raise IllegalCommand("Resolve reactions before using paid abilities")
             use_paid_ability(result, actor, command, definitions)
         elif isinstance(command, RezCard):
             card, definition = validate_rez(result, actor, command.card_instance_id, definitions)
             actor.credits -= definition.rez_cost
             result.card_instances[card.instance_id] = card.model_copy(update={"face_up": True, "rezzed": True})
             card = result.card_instances[card.instance_id]
-            resolve_lifecycle(result, actor, card, definition.rez_instructions, definition)
+            resolve_lifecycle(result, actor, card, definitions, trigger="rez")
         elif isinstance(command, ScoreAgenda):
             if (result.run is not None or result.window.kind != "paid" or result.turn.active_player is not PlayerRole.CORP
                     or result.turn.phase not in {TurnPhase.DRAW, TurnPhase.ACTION}):
@@ -257,27 +268,20 @@ def apply_command(
             if card.counters.get("advancement", 0) < definition.advancement_requirement:
                 raise IllegalCommand("The agenda has not met its advancement requirement")
             result.card_instances[card.instance_id] = card.model_copy(update={
-                "installed": False, "rezzed": False, "face_up": True, "counters": {},
+                "installed": False, "rezzed": False, "face_up": True, "counters": {}, "loaded_counter_types": set(),
                 "location": ZoneLocation(zone=CardZone.SCORE_AREA, player_id=actor.player_id)})
             remove_empty_remotes(result)
             # CR 1.17.2: the victory checkpoint precedes scoring reactions.
             if agenda_points(result, actor, definitions) >= 7:
                 result.winner = player.role
                 result.window = None
-            elif definition.score_instructions:
-                result.window = PriorityWindow(kind="reaction", player=player.role,
-                                               pending_card_ids=[card.instance_id])
+            else:
+                emit_fact(result, definitions, RuleFact(type="score", player=player.role,
+                                                       card_instance_id=card.instance_id))
         else:
-            if result.window.kind != "reaction" or command.card_instance_id not in result.window.pending_card_ids:
+            if result.window.kind != "reaction":
                 raise IllegalCommand("Choose a pending reaction")
-            card = result.card_instances[command.card_instance_id]
-            for instruction in definitions[card.definition_id].score_instructions:
-                resolve_effect(result, actor, instruction)
-                if result.winner is not None:
-                    break
-            result.window.pending_card_ids.remove(card.instance_id)
-            if not result.window.pending_card_ids:
-                result.window = PriorityWindow(kind="paid", player=PlayerRole.CORP)
+            resolve_reaction(result, definitions, command)
         advance_turn(result, card_definitions)
         return GameState.model_validate(result.model_dump())
     if isinstance(command, DiscardCards):
@@ -315,7 +319,10 @@ def apply_command(
             raise IllegalCommand("Advancing costs 1 credit")
         actor.credits -= 1
         actor.clicks_remaining -= 1
+        previous = card.counters.get("advancement", 0)
         card.counters["advancement"] = card.counters.get("advancement", 0) + 1
+        emit_fact(result, card_definitions or {}, RuleFact(type="advance", player=player.role,
+                  card_instance_id=card.instance_id, previous_advancement=previous))
     elif isinstance(command, PlayCard):
         result = state.model_copy(deep=True)
         play_card(result, _player_for_role(result, player.role), command.card_instance_id,
@@ -328,7 +335,8 @@ def apply_command(
         result = state.model_copy(deep=True)
         active_player = _player_for_role(result, player.role)
         active_player.clicks_remaining -= 1
-        drew_all = draw_from_deck(result, player_id, 1)
+        amount = basic_draw_amount(result, active_player, card_definitions or {})
+        drew_all = draw_from_deck(result, player_id, amount)
         if not drew_all and player.role is PlayerRole.CORP:
             # CR 1.7.2c: the Corp loses when required to draw from an empty R&D.
             result.winner = PlayerRole.RUNNER
@@ -356,6 +364,8 @@ def apply_command(
     else:
         raise IllegalCommand("Unsupported command")
 
+    result.pending_action_fact = RuleFact(type="action", player=player.role,
+        card_instance_id=getattr(command, "card_instance_id", None), action=type(command).__name__)
     result.turn.step = "before_action"
     advance_turn(result, card_definitions)
     return GameState.model_validate(result.model_dump())

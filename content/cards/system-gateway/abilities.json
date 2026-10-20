@@ -131,5 +131,105 @@
       "type": "initiate_run",
       "hosted_credits": 5
     }
-  ]
+  ],
+  "30033": {
+    "install_instructions": [],
+    "action_abilities": [
+      {
+        "ability_id": "load_credits",
+        "label": "Place 3 hosted credits",
+        "instructions": [
+          {
+            "type": "load_credits",
+            "amount": 3
+          }
+        ]
+      }
+    ],
+    "triggered_abilities": [
+      {
+        "ability_id": "turn_income",
+        "label": "Take 1 hosted credit",
+        "trigger": "turn_begin",
+        "instructions": [
+          {
+            "type": "take_credits",
+            "amount": 1
+          }
+        ]
+      }
+    ]
+  },
+  "30034": {
+    "install_instructions": [],
+    "first_basic_draw_amount": 2
+  },
+  "30037": {
+    "rez_instructions": [
+      {
+        "type": "load_credits",
+        "amount": 9
+      }
+    ],
+    "triggered_abilities": [
+      {
+        "ability_id": "turn_income",
+        "label": "Take 3 hosted credits",
+        "trigger": "turn_begin",
+        "instructions": [
+          {
+            "type": "take_credits",
+            "amount": 3
+          }
+        ]
+      },
+      {
+        "ability_id": "empty",
+        "label": "Trash this asset and draw 1 card",
+        "trigger": "empty",
+        "instructions": [
+          {
+            "type": "trash_source"
+          },
+          {
+            "type": "draw_cards",
+            "amount": 1
+          }
+        ],
+        "scope": "self"
+      }
+    ]
+  },
+  "30043": {
+    "triggered_abilities": [
+      {
+        "ability_id": "discard_income",
+        "label": "Gain 1 credit if Archives has a facedown card",
+        "trigger": "discard_end",
+        "instructions": [
+          {
+            "type": "gain_credits",
+            "amount": 1
+          }
+        ],
+        "condition": "facedown_archives"
+      }
+    ]
+  },
+  "30059": {
+    "triggered_abilities": [
+      {
+        "ability_id": "advance_income",
+        "label": "Gain 2 credits for a previously unadvanced card",
+        "trigger": "advance",
+        "instructions": [
+          {
+            "type": "gain_credits",
+            "amount": 2
+          }
+        ],
+        "condition": "previously_unadvanced"
+      }
+    ]
+  }
 }
