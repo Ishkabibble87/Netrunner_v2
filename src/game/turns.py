@@ -15,12 +15,8 @@ from .models import (
     TurnPhase,
     TurnState,
 )
+from .modifiers import maximum_hand_size
 from .priority import open_paid_window
-
-
-def maximum_hand_size(player: PlayerState) -> int:
-    """Apply the base hand limit and currently modeled core damage (CR 5.5.3)."""
-    return 5 - player.core_damage if player.role is PlayerRole.RUNNER else 5
 
 
 def hand_cards(state: GameState, player: PlayerState):
@@ -34,7 +30,8 @@ def advance_turn(state: GameState, definitions=None) -> None:
     """Mutate a working snapshot through automatic steps, stopping at a decision."""
     from .reactions import collect_turn_end, emit_fact
 
-    while state.winner is None and state.turn is not None and state.window is None and state.run is None:
+    while (state.winner is None and state.turn is not None and state.window is None
+           and state.run is None and not state.memory_trash_pending):
         if state.pending_action_fact is not None:
             fact = state.pending_action_fact
             state.pending_action_fact = None
@@ -64,7 +61,7 @@ def advance_turn(state: GameState, definitions=None) -> None:
             turn.phase = TurnPhase.DISCARD
             turn.step = "discard"
         elif turn.step == "discard":
-            limit = maximum_hand_size(player)
+            limit = maximum_hand_size(player, state, definitions)
             if limit < 0:
                 state.winner = PlayerRole.CORP
                 return

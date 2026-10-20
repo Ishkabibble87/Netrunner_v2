@@ -220,7 +220,7 @@ class PlayerState(DomainModel):
     memory_limit: int | None = Field(
         default=None,
         ge=0,
-        description="Runner's maximum available memory, including active modifiers",
+        description="Runner's starting memory limit; active bonuses are derived from card sources",
     )
     deck_selection: DeckSelection
     identity_card_instance_id: UUID
@@ -356,6 +356,7 @@ class GameState(DomainModel):
     window: PriorityWindow | None = None
     suspended_windows: list[PriorityWindow | None] = Field(default_factory=list)
     pending_action_fact: RuleFact | None = None
+    memory_trash_pending: bool = False
     run: RunState | None = None
     servers: list[ServerId] = Field(default_factory=lambda: list(CentralServer))
     card_instances: dict[UUID, CardInstance] = Field(default_factory=dict)
@@ -483,5 +484,5 @@ class PendingDecision(DomainModel):
     """Public decision context, excluding private cards and executable choices."""
 
     player: PlayerRole
-    type: Literal["choose_opening_hand", "choose_action", "discard_to_hand_limit", "paid_ability_window", "resolve_reaction", "continue_run", "choose_access", "resolve_access"]
+    type: Literal["choose_opening_hand", "choose_action", "discard_to_hand_limit", "paid_ability_window", "resolve_reaction", "continue_run", "choose_access", "resolve_access", "trash_for_memory"]
     cards_to_discard: int | None = None

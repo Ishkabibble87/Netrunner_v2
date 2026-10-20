@@ -60,6 +60,13 @@ class DiscardSelection:
 
 
 @dataclass(frozen=True)
+class TrashPrograms:
+    """Choose installed programs to trash at a memory-overflow checkpoint."""
+
+    card_instance_ids: tuple[UUID, ...]
+
+
+@dataclass(frozen=True)
 class InstallCard:
     """Install a card; Runner cards have no server destination."""
 
@@ -144,4 +151,4 @@ class UseCardAbility:
     server_id: ServerId | None = None
 
 
-GameCommand = RezCard | UseCardAbility | RunServer | ContinueRun | JackOut | AccessCard | FinishAccess | InstallCard | AdvanceCard | ScoreAgenda | PassPriority | ResolveReaction | ChooseMulligan | GainCredit | DrawCard | RemoveTag | PurgeVirusCounters | DiscardCards | PlayCard
+GameCommand = TrashPrograms | RezCard | UseCardAbility | RunServer | ContinueRun | JackOut | AccessCard | FinishAccess | InstallCard | AdvanceCard | ScoreAgenda | PassPriority | ResolveReaction | ChooseMulligan | GainCredit | DrawCard | RemoveTag | PurgeVirusCounters | DiscardCards | PlayCard

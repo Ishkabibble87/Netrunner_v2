@@ -17,8 +17,9 @@ from game.commands import (
     PassPriority,
     ResolveReaction,
     RezCard,
+    TrashPrograms,
 )
-from game.engine import apply_command, legal_actions_for
+from game.engine import apply_command, legal_actions_for, pending_decision
 from game.models import GameState, MulliganDecision, PlayerRole
 
 
@@ -45,7 +46,7 @@ def advance_ai_decisions(state: GameState, ai_player_ids: set[UUID], card_defini
     """
     state = advance_ai_setup(state, ai_player_ids)
     while state.winner is None and state.turn is not None:
-        role = state.window.player if state.window else state.turn.active_player
+        role = pending_decision(state, card_definitions).player
         player = state.corp if role is PlayerRole.CORP else state.runner
         if player.player_id not in ai_player_ids:
             break
@@ -54,7 +55,7 @@ def advance_ai_decisions(state: GameState, ai_player_ids: set[UUID], card_defini
             break
         selection = next((a for a in actions if isinstance(a, DiscardSelection)), None)
         command = (DiscardCards(selection.eligible_card_instance_ids[:selection.required_count])
-                   if selection else next((a for a in actions if isinstance(a, (ResolveReaction, PassPriority))), GainCredit()))
+                   if selection else next((a for a in actions if isinstance(a, (TrashPrograms, ResolveReaction, PassPriority))), GainCredit()))
         if state.run is not None:
             command = next((a for a in actions if isinstance(a, RezCard)), command)
         state = apply_command(state, player.player_id, command, card_definitions)

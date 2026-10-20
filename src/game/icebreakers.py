@@ -11,18 +11,31 @@ from content.cards.models import CardDefinition, PaidAbility
 
 from .commands import UseCardAbility
 from .models import CardInstance, GameState, PlayerRole, PlayerState
+from .modifiers import installed_icebreaker_count
 from .payments import runner_funds, spend_runner_credits
 from .setup import IllegalCommand
 
 
-def effective_strength(state: GameState, card: CardInstance, definition: CardDefinition) -> int:
-    """Apply authored remote bonuses only to active ice, and encounter boosts."""
+def effective_strength(state: GameState, card: CardInstance, definition: CardDefinition,
+                       definitions: Mapping[str, CardDefinition]) -> int:
+    """Combine live static bonuses with strength paid for this encounter."""
     strength = definition.strength or 0
+    if card.installed and card.face_up and definition.strength_per_icebreaker:
+        strength += definition.strength_per_icebreaker * installed_icebreaker_count(
+            state, card.controller_id, definitions)
     if card.rezzed and card.location.server and isinstance(card.location.server.server_id, int):
         strength += definition.remote_strength_bonus
     if state.run and state.run.phase == "encounter":
         strength += state.run.strength_boosts.get(card.instance_id, 0)
     return strength
+
+
+def paid_ability_amount(state: GameState, card: CardInstance, ability: PaidAbility,
+                        definitions: Mapping[str, CardDefinition]) -> int:
+    """Evaluate a boost when paid; stored encounter boosts keep that fixed value."""
+    if ability.amount_per_icebreaker:
+        return ability.amount * installed_icebreaker_count(state, card.controller_id, definitions)
+    return ability.amount
 
 
 def validate_paid_ability(state: GameState, player: PlayerState, command: UseCardAbility,
@@ -52,7 +65,7 @@ def validate_paid_ability(state: GameState, player: PlayerState, command: UseCar
     ice = state.card_instances[run.current_ice_id]
     ice_definition = definitions[ice.definition_id]
     if ("Icebreaker" not in definition.subtypes or ability.subtype not in ice_definition.subtypes
-            or effective_strength(state, card, definition) < effective_strength(state, ice, ice_definition)):
+            or effective_strength(state, card, definition, definitions) < effective_strength(state, ice, ice_definition, definitions)):
         raise IllegalCommand("The icebreaker must match the ice subtype and strength")
     if (not targets or len(targets) > ability.amount or len(set(targets)) != len(targets)
             or any(i < 0 or i >= len(ice_definition.subroutines or ())
@@ -97,4 +110,6 @@ def use_paid_ability(state: GameState, player: PlayerState, command: UseCardAbil
         state.run.broken_subroutine_indices.extend(command.subroutine_indices)
     elif state.run and state.run.phase == "encounter":
         boosts = state.run.strength_boosts
-        boosts[command.card_instance_id] = boosts.get(command.card_instance_id, 0) + ability.amount
+        card = state.card_instances[command.card_instance_id]
+        amount = paid_ability_amount(state, card, ability, definitions)
+        boosts[command.card_instance_id] = boosts.get(command.card_instance_id, 0) + amount

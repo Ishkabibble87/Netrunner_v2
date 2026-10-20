@@ -38,10 +38,11 @@ from game.commands import (
     RezCard,
     RunServer,
     ScoreAgenda,
+    TrashPrograms,
     UseCardAbility,
 )
 from game.engine import legal_actions_for, pending_decision
-from game.icebreakers import effective_strength
+from game.icebreakers import effective_strength, paid_ability_amount
 from game.installation import agenda_points, installed_programs
 from game.models import (
     CardZone,
@@ -52,6 +53,7 @@ from game.models import (
     PlayerState,
     ServerId,
 )
+from game.modifiers import install_cost, memory_limit
 from game.payments import event_credits
 from game.turns import maximum_hand_size
 
@@ -110,6 +112,13 @@ class DiscardCardsCommandRequest(ApiModel):
     card_instance_ids: list[UUID] = Field(min_length=1)
 
 
+class TrashProgramsCommandRequest(ApiModel):
+    """Choose programs to trash after losing available memory."""
+
+    type: Literal["trash_programs"]
+    card_instance_ids: list[UUID] = Field(min_length=1)
+
+
 class DiscardCardsAction(ApiModel):
     """A private selection action, avoiding combinatorial command enumeration."""
 
@@ -122,7 +131,7 @@ class DecisionView(ApiModel):
     """Public context shared by both players, never hidden card choices."""
 
     player: PlayerRole
-    type: Literal["choose_opening_hand", "choose_action", "discard_to_hand_limit", "paid_ability_window", "resolve_reaction", "continue_run", "choose_access", "resolve_access"]
+    type: Literal["choose_opening_hand", "choose_action", "discard_to_hand_limit", "paid_ability_window", "resolve_reaction", "continue_run", "choose_access", "resolve_access", "trash_for_memory"]
     cards_to_discard: int | None = None
 
 
@@ -208,6 +217,7 @@ PlayerCommandRequest = Annotated[
     | RemoveTagCommandRequest
     | PurgeVirusCountersCommandRequest
     | DiscardCardsCommandRequest
+    | TrashProgramsCommandRequest
     | PlayCardCommandRequest
     | InstallCardCommandRequest
     | RezCardCommandRequest
@@ -225,6 +235,8 @@ LegalAction = PlayerCommandRequest | DiscardCardsAction
 
 def game_command_from_request(request: PlayerCommandRequest) -> GameCommand:
     """Translate a validated API command into the transport-independent game type."""
+    if isinstance(request, TrashProgramsCommandRequest):
+        return TrashPrograms(tuple(request.card_instance_ids))
     if isinstance(request, RunServerCommandRequest):
         return RunServer(request.server_id)
     if isinstance(request, ContinueRunCommandRequest):
@@ -278,6 +290,8 @@ def command_request_from_game(command: GameCommand | DiscardSelection) -> LegalA
         return AccessCardCommandRequest(type="access_card", target=command.target)
     if isinstance(command, FinishAccess):
         return FinishAccessCommandRequest(type="finish_access", trash=command.trash)
+    if isinstance(command, TrashPrograms):
+        return TrashProgramsCommandRequest(type="trash_programs", card_instance_ids=list(command.card_instance_ids))
     if isinstance(command, PlayCard):
         return PlayCardCommandRequest(type="play_card", card_instance_id=command.card_instance_id, server_id=command.server_id)
     if isinstance(command, InstallCard):
@@ -328,6 +342,7 @@ class CardView(ApiModel):
     ability_labels: dict[str, str] = Field(default_factory=dict)
     paid_ability_ids: list[str] = Field(default_factory=list)
     strength: int | None = None
+    effective_install_cost: int | None = None
 
 
 class InstalledCardView(ApiModel):
@@ -462,9 +477,14 @@ class InitialGameView(ApiModel):
                 definition_id=instance.definition_id,
                 title=definition.title,
                 card_type=definition.card_type,
-                ability_labels={a.ability_id: a.label for a in (*definition.action_abilities, *definition.paid_abilities)},
+                ability_labels={a.ability_id: (
+                    a.label.replace("+X", f"+{paid_ability_amount(state, instance, a, card_definitions)}")
+                    if getattr(a, "amount_per_icebreaker", False) else a.label)
+                    for a in (*definition.action_abilities, *definition.paid_abilities)},
                 paid_ability_ids=[a.ability_id for a in definition.paid_abilities],
-                strength=effective_strength(state, instance, definition) if definition.strength is not None else None,
+                strength=effective_strength(state, instance, definition, card_definitions) if definition.strength is not None else None,
+                effective_install_cost=(install_cost(state, state.runner, definition, card_definitions)
+                    if state.turn and definition.side is CardSide.RUNNER and definition.install_cost is not None else None),
             )
 
         def player_summary(player: PlayerState) -> PlayerSummary:
@@ -478,10 +498,10 @@ class InitialGameView(ApiModel):
                 credits=player.credits,
                 clicks_remaining=player.clicks_remaining,
                 tags=player.tags,
-                memory_limit=player.memory_limit,
+                memory_limit=memory_limit(state, player, card_definitions),
                 memory_used=sum(card_definitions[c.definition_id].memory_cost or 0
                                 for c in installed_programs(state, player, card_definitions)),
-                maximum_hand_size=maximum_hand_size(player),
+                maximum_hand_size=maximum_hand_size(player, state, card_definitions),
                 discard_count=sum(card.location.zone is CardZone.DISCARD_PILE
                                   and card.location.player_id == player.player_id
                                   for card in state.card_instances.values()),
@@ -513,7 +533,7 @@ class InitialGameView(ApiModel):
             visible_ids = {i for i in state.run.visible_card_ids
                            if you.role is PlayerRole.RUNNER
                            or state.card_instances[i].location.zone is not CardZone.DECK}
-        decision = pending_decision(state)
+        decision = pending_decision(state, card_definitions)
         return cls(
             run=RunView(
                 server_id=state.run.server_id, phase=state.run.phase,
@@ -639,4 +659,4 @@ class CardCatalogEntry(ApiModel):
     @classmethod
     def from_definition(cls, definition: CardDefinition) -> "CardCatalogEntry":
         return cls(**definition.model_dump(exclude={"play_instructions", "score_instructions", "install_instructions",
-                                                   "rez_instructions", "action_abilities", "trash_when_empty", "paid_abilities", "subroutines", "remote_strength_bonus", "triggered_abilities", "first_basic_draw_amount"}))
+                                                   "rez_instructions", "action_abilities", "trash_when_empty", "paid_abilities", "subroutines", "remote_strength_bonus", "triggered_abilities", "first_basic_draw_amount", "memory_bonus", "hand_size_bonus", "first_program_discount", "strength_per_icebreaker"}))

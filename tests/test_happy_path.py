@@ -45,6 +45,7 @@ from game.models import (
     PlayerRole,
     TurnPhase,
 )
+from game.modifiers import memory_limit
 from game.setup import IllegalCommand
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -270,7 +271,7 @@ class GameProgressTests(unittest.TestCase):
         by all three Offices. Remaining copies follow in definition-ID order.
         """
         titles = ["Hedge Fund", "Government Subsidy", "Offworld Office", "Regolith Mining License",
-                  "Sure Gamble", "Creative Commission", "Telework Contract", "VRcation", "Cleaver", "Palisade", "Jailbreak", "Overclock", "Docklands Pass", "Red Team"]
+                  "Sure Gamble", "Creative Commission", "Telework Contract", "VRcation", "Cleaver", "Palisade", "Jailbreak", "Overclock", "Docklands Pass", "Red Team", "Pennyshaver"]
         codes = [next(code for code, card in self.cards.items() if card.title == title) for title in titles]
         codes += sorted(set(selection.card_counts) - set(codes))
         return [code for code in codes for _ in range(selection.card_counts.get(code, 0))]
@@ -664,7 +665,7 @@ class GameProgressTests(unittest.TestCase):
     def use_run_triggered_cards(self, session):
         """Install hardware and run with Red Team through a multiaccess breach."""
         runner = PlayerRole.RUNNER
-        wanted = {"Docklands Pass", "Red Team"}
+        wanted = {"Docklands Pass", "Red Team", "Pennyshaver"}
 
         def submit(role, command):
             player = session.state.corp if role is PlayerRole.CORP else session.state.runner
@@ -707,8 +708,15 @@ class GameProgressTests(unittest.TestCase):
             if session.state.turn.number == turn:
                 submit(runner, GainCredit())
         settle()
-        for title in ("Docklands Pass", "Red Team"):
+        for title in ("Docklands Pass", "Red Team", "Pennyshaver"):
             submit(runner, InstallCard(found[title]))
+            settle()
+        penny = found["Pennyshaver"]
+        self.assertEqual(memory_limit(session.state, session.state.runner, self.cards), 5)
+        # Start the run on a fresh turn so its history stays available for inspection.
+        turn = session.state.turn.number
+        while session.state.turn.number == turn:
+            submit(runner, GainCredit())
             settle()
         team = found["Red Team"]
         self.assertEqual(session.state.card_instances[team].counters["credit"], 12)
@@ -720,6 +728,7 @@ class GameProgressTests(unittest.TestCase):
         settle()
         self.assertEqual(session.state.runner.credits, credits + 3)
         self.assertEqual(session.state.card_instances[team].counters["credit"], 9)
+        self.assertEqual(session.state.card_instances[penny].counters["credit"], 1)
         self.assertEqual(session.state.run.access_limit, 2)
         for _ in range(2):
             submit(runner, AccessCard("hq"))
@@ -729,6 +738,10 @@ class GameProgressTests(unittest.TestCase):
         targets = {a.server_id for a in legal_actions_for(session.state, session.state.runner.player_id, self.cards)
                    if isinstance(a, UseCardAbility) and a.card_instance_id == team}
         self.assertEqual(targets, {"rd", "archives"})
+        before = session.state.runner.credits
+        submit(runner, UseCardAbility(penny, "cash_out"))
+        self.assertEqual(session.state.runner.credits, before + 2)
+        self.assertEqual(session.state.card_instances[penny].counters["credit"], 0)
 
     def use_turn_triggered_economy(self, session):
         """Continue the core game through installation, loading and a turn-start payout."""

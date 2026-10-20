@@ -10,7 +10,7 @@ from uuid import UUID
 
 from content.cards.models import CardDefinition, InitiateRun
 
-from .card_movement import draw_from_deck
+from .card_movement import draw_from_deck, trash_installed_card
 from .card_play import play_card, validate_card_play
 from .commands import (
     AccessCard,
@@ -33,6 +33,7 @@ from .commands import (
     RezCard,
     RunServer,
     ScoreAgenda,
+    TrashPrograms,
     UseCardAbility,
 )
 from .icebreakers import paid_actions, use_paid_ability
@@ -61,8 +62,16 @@ from .models import (
     TurnPhase,
     ZoneLocation,
 )
+from .modifiers import memory_limit, memory_used
 from .priority import pass_priority
-from .reactions import basic_draw_amount, emit_fact, pass_reactions, resolve_reaction
+from .reactions import (
+    basic_draw_amount,
+    checkpoint,
+    emit_fact,
+    pass_reactions,
+    resolve_reaction,
+    settle_reactions,
+)
 from .runs import (
     advance_run,
     resolve_run_command,
@@ -97,6 +106,15 @@ def legal_actions_for(
         )
 
     definitions = card_definitions or {}
+    if state.memory_trash_pending:
+        if player.role is not PlayerRole.RUNNER:
+            return ()
+        programs = installed_programs(state, player, definitions)
+        excess = memory_used(state, definitions) - memory_limit(state, player, definitions)
+        return tuple(TrashPrograms(tuple(c.instance_id for c in choice))
+                     for count in range(1, len(programs) + 1)
+                     for choice in combinations(programs, count)
+                     if sum(definitions[c.definition_id].memory_cost or 0 for c in choice) >= excess)
     if state.run is not None and state.window is None:
         return run_actions(state, definitions) if player.role is PlayerRole.RUNNER else ()
     if state.window is not None:
@@ -131,7 +149,7 @@ def legal_actions_for(
     if (state.turn is not None and state.turn.phase is TurnPhase.DISCARD
             and state.turn.active_player is player.role):
         cards = hand_cards(state, player)
-        count = len(cards) - maximum_hand_size(player)
+        count = len(cards) - maximum_hand_size(player, state, definitions)
         if count > 0:
             return (DiscardSelection(tuple(card.instance_id for card in cards), count),)
         return ()
@@ -223,6 +241,24 @@ def apply_command(
     player = _player_for_id(state, player_id)
     if player is None:
         raise IllegalCommand("Player is not part of this game")
+    if state.memory_trash_pending:
+        definitions = card_definitions or {}
+        if not isinstance(command, TrashPrograms) or player.role is not PlayerRole.RUNNER or state.winner:
+            raise IllegalCommand("The Runner must trash installed programs to satisfy the memory limit")
+        selected = set(command.card_instance_ids)
+        eligible = {c.instance_id for c in installed_programs(state, player, definitions)}
+        if (not selected or len(selected) != len(command.card_instance_ids) or not selected <= eligible
+                or memory_used(state, definitions) - sum(definitions[state.card_instances[i].definition_id].memory_cost or 0
+                    for i in selected) > memory_limit(state, player, definitions)):
+            raise IllegalCommand("Choose distinct installed programs that free enough memory")
+        result = state.model_copy(deep=True)
+        for instance_id in command.card_instance_ids:
+            trash_installed_card(result, result.card_instances[instance_id])
+        checkpoint(result, definitions)
+        settle_reactions(result, definitions)
+        advance_run(result, definitions)
+        advance_turn(result, definitions)
+        return GameState.model_validate(result.model_dump())
     run_commands = (RunServer, ContinueRun, JackOut, AccessCard, FinishAccess)
     if ((state.run is not None and state.window is None)
             or isinstance(command, run_commands)):
@@ -300,7 +336,7 @@ def apply_command(
                 or state.turn.active_player is not player.role):
             raise IllegalCommand("Discard only during your discard decision")
         eligible = {card.instance_id for card in hand_cards(state, player)}
-        required = len(eligible) - maximum_hand_size(player)
+        required = len(eligible) - maximum_hand_size(player, state, card_definitions)
         selected = command.card_instance_ids
         if (required <= 0 or len(selected) != required
                 or len(set(selected)) != required or not set(selected) <= eligible):
@@ -377,6 +413,7 @@ def apply_command(
     result.pending_action_fact = RuleFact(type="action", player=player.role,
         card_instance_id=getattr(command, "card_instance_id", None), action=type(command).__name__)
     result.turn.step = "before_action"
+    checkpoint(result, card_definitions or {})
     advance_run(result, card_definitions or {})
     advance_turn(result, card_definitions)
     return GameState.model_validate(result.model_dump())
@@ -411,10 +448,12 @@ def _player_for_role(state: GameState, role: PlayerRole) -> PlayerState:
     return state.corp if role is PlayerRole.CORP else state.runner
 
 
-def pending_decision(state: GameState) -> PendingDecision | None:
+def pending_decision(state: GameState, definitions=None) -> PendingDecision | None:
     """Describe the public decision independently of either player's view."""
     if state.winner is not None:
         return None
+    if state.memory_trash_pending:
+        return PendingDecision(player=PlayerRole.RUNNER, type="trash_for_memory")
     if state.setup.pending_player is not None:
         return PendingDecision(player=state.setup.pending_player, type="choose_opening_hand")
     if state.run is not None and state.window is None:
@@ -427,5 +466,5 @@ def pending_decision(state: GameState) -> PendingDecision | None:
     player = _player_for_role(state, state.turn.active_player)
     if state.turn.phase is TurnPhase.DISCARD:
         return PendingDecision(player=player.role, type="discard_to_hand_limit",
-                               cards_to_discard=len(hand_cards(state, player)) - maximum_hand_size(player))
+                               cards_to_discard=len(hand_cards(state, player)) - maximum_hand_size(player, state, definitions))
     return PendingDecision(player=player.role, type="choose_action")

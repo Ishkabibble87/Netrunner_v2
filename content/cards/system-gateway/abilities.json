@@ -1,4 +1,103 @@
 {
+  "30003": {
+    "install_instructions": [],
+    "memory_bonus": 1
+  },
+  "30014": {
+    "install_instructions": [],
+    "memory_bonus": 1,
+    "triggered_abilities": [
+      {
+        "ability_id": "successful_run_credit",
+        "label": "Place 1 hosted credit",
+        "trigger": "run_success",
+        "instructions": [{"type": "load_credits", "amount": 1}]
+      }
+    ],
+    "action_abilities": [
+      {
+        "ability_id": "cash_out",
+        "label": "Place 1 credit, then take all hosted credits",
+        "instructions": [
+          {"type": "load_credits", "amount": 1},
+          {"type": "take_credits", "amount": "all"}
+        ]
+      }
+    ]
+  },
+  "30022": {
+    "install_instructions": [],
+    "memory_bonus": 1,
+    "first_program_discount": 1
+  },
+  "30023": {
+    "install_instructions": [],
+    "memory_bonus": 1
+  },
+  "30031": {
+    "install_instructions": [],
+    "memory_bonus": 1,
+    "hand_size_bonus": 1
+  },
+  "30035": {
+    "hand_size_bonus": 1
+  },
+  "30070": {
+    "score_instructions": [],
+    "hand_size_bonus": 2,
+    "triggered_abilities": [
+      {
+        "ability_id": "score_draw",
+        "label": "Draw 2 cards",
+        "trigger": "score",
+        "scope": "self",
+        "optional": true,
+        "instructions": [{"type": "draw_cards", "amount": 2}]
+      }
+    ]
+  },
+  "30025": {
+    "install_instructions": [],
+    "strength_per_icebreaker": 1,
+    "paid_abilities": [
+      {
+        "ability_id": "break_sentry",
+        "label": "Break 1 sentry subroutine · 1 credit",
+        "type": "break_subroutines",
+        "credit_cost": 1,
+        "amount": 1,
+        "subtype": "Sentry"
+      },
+      {
+        "ability_id": "boost_strength",
+        "label": "+2 strength this encounter · 3 credits",
+        "type": "boost_strength",
+        "credit_cost": 3,
+        "amount": 2
+      }
+    ]
+  },
+  "30026": {
+    "install_instructions": [],
+    "paid_abilities": [
+      {
+        "ability_id": "break_code_gate",
+        "label": "Break 1 code gate subroutine · 1 credit",
+        "type": "break_subroutines",
+        "credit_cost": 1,
+        "amount": 1,
+        "subtype": "Code Gate"
+      },
+      {
+        "ability_id": "boost_strength",
+        "label": "+X strength this encounter · 1 credit",
+        "type": "boost_strength",
+        "credit_cost": 1,
+        "amount": 1,
+        "amount_per_icebreaker": true
+      }
+    ]
+  },
   "30075": [
     {
       "type": "gain_credits",

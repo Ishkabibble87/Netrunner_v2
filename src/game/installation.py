@@ -10,6 +10,7 @@ from uuid import UUID
 
 from content.cards.models import CardDefinition, CardSide, CardType
 
+from .card_movement import trash_installed_card
 from .commands import InstallCard
 from .installed_abilities import resolve_lifecycle
 from .models import (
@@ -23,6 +24,7 @@ from .models import (
     ServerLocation,
     ZoneLocation,
 )
+from .modifiers import install_cost, memory_limit
 from .setup import IllegalCommand
 
 
@@ -60,11 +62,11 @@ def validate_install(state: GameState, player: PlayerState, command: InstallCard
             raise IllegalCommand("Choose distinct programs you control to trash when installing a program")
         if definition.card_type is CardType.PROGRAM:
             used = sum(definitions[c.definition_id].memory_cost or 0 for c in programs if c.instance_id not in trash_ids)
-            if used + (definition.memory_cost or 0) > player.memory_limit:
+            if used + (definition.memory_cost or 0) > memory_limit(state, player, definitions):
                 raise IllegalCommand("Trash installed programs to make enough memory available")
-        if definition.install_cost is None or player.credits < definition.install_cost:
+        if definition.install_cost is None or player.credits < install_cost(state, player, definition, definitions):
             raise IllegalCommand("Not enough credits to install this card")
-        return definition, definition.install_cost
+        return definition, install_cost(state, player, definition, definitions)
     if (player.role is not PlayerRole.CORP or card is None
             or card.owner_id != player.player_id or card.controller_id != player.player_id
             or card.location.zone is not CardZone.HAND or card.location.player_id != player.player_id
@@ -102,11 +104,7 @@ def install_card(state: GameState, player: PlayerState, command: InstallCard,
     definition, cost = validate_install(state, player, command, definitions)
     if player.role is PlayerRole.RUNNER:
         for instance_id in command.trash_card_instance_ids:
-            old = state.card_instances[instance_id]
-            state.card_instances[instance_id] = old.model_copy(update={
-                "installed": False, "rezzed": False, "face_up": True, "counters": {}, "loaded_counter_types": set(),
-                "ability_last_used_turn": {}, "controller_id": None,
-                "location": ZoneLocation(zone=CardZone.DISCARD_PILE, player_id=player.player_id)})
+            trash_installed_card(state, state.card_instances[instance_id])
         player.credits -= cost
         player.clicks_remaining -= 1
         card = state.card_instances[command.card_instance_id].model_copy(update={
@@ -114,6 +112,17 @@ def install_card(state: GameState, player: PlayerState, command: InstallCard,
             "location": ZoneLocation(zone=CardZone.PLAY_AREA),
         })
         state.card_instances[card.instance_id] = card
+        if "Console" in definition.subtypes:
+            # CR 3.8.5: keep the most recently active console, trash the others.
+            for old in tuple(state.card_instances.values()):
+                if (old.instance_id != card.instance_id and old.installed and old.face_up
+                        and old.controller_id == player.player_id
+                        and definitions[old.definition_id].card_type is CardType.HARDWARE
+                        and "Console" in definitions[old.definition_id].subtypes):
+                    trash_installed_card(state, old)
+        if definition.card_type is CardType.PROGRAM:
+            key = f"program_install:{player.role}"
+            state.turn.occurrences[key] = state.turn.occurrences.get(key, 0) + 1
         resolve_lifecycle(state, player, card, definitions, trigger="install")
         return
     target = command.server_id

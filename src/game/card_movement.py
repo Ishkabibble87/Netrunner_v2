@@ -5,6 +5,16 @@ from uuid import UUID
 from .models import CardZone, GameState, ZoneLocation
 
 
+def trash_installed_card(state, card):
+    """Move an installed source to its owner's discard pile and clear its state."""
+    state.card_instances[card.instance_id] = card.model_copy(update={
+        "installed": False, "rezzed": False, "face_up": True,
+        "controller_id": None, "counters": {}, "loaded_counter_types": set(),
+        "ability_last_used_turn": {},
+        "location": ZoneLocation(zone=CardZone.DISCARD_PILE, player_id=card.owner_id),
+    })
+
+
 def draw_from_deck(state: GameState, player_id: UUID, count: int) -> bool:
     """Move up to ``count`` top cards into a player's hand.
 

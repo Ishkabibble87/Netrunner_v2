@@ -54,7 +54,7 @@ class LoadCredits(CardContentModel):
 
 class TakeCredits(CardContentModel):
     type: Literal["take_credits"]
-    amount: int = Field(gt=0)
+    amount: Annotated[int, Field(gt=0)] | Literal["all"]
 
 
 class GainAccessCredits(CardContentModel):
@@ -113,13 +113,14 @@ class ActionAbility(CardContentModel):
 
 
 class PaidAbility(CardContentModel):
-    """The first breaker abilities: encounter strength and barrier interfaces."""
+    """Breaker interfaces and encounter boosts with fixed or live-count amounts."""
 
     ability_id: str = Field(min_length=1)
     label: str = Field(min_length=1)
     type: Literal["boost_strength", "break_subroutines"]
     credit_cost: int = Field(ge=0)
     amount: int = Field(gt=0)
+    amount_per_icebreaker: bool = False
     subtype: str | None = None
 
 
@@ -142,6 +143,10 @@ class AuthoredAbilities(CardContentModel):
     remote_strength_bonus: int = Field(default=0, ge=0)
     triggered_abilities: tuple[TriggeredAbility, ...] = ()
     first_basic_draw_amount: int | None = Field(default=None, gt=0)
+    memory_bonus: int = Field(default=0, ge=0)
+    hand_size_bonus: int = Field(default=0, ge=0)
+    first_program_discount: int = Field(default=0, ge=0)
+    strength_per_icebreaker: int = Field(default=0, ge=0)
 
 
 class CardDefinition(CardContentModel):
@@ -171,6 +176,10 @@ class CardDefinition(CardContentModel):
     remote_strength_bonus: int = Field(default=0, ge=0)
     triggered_abilities: tuple[TriggeredAbility, ...] = ()
     first_basic_draw_amount: int | None = Field(default=None, gt=0)
+    memory_bonus: int = Field(default=0, ge=0)
+    hand_size_bonus: int = Field(default=0, ge=0)
+    first_program_discount: int = Field(default=0, ge=0)
+    strength_per_icebreaker: int = Field(default=0, ge=0)
 
     play_cost: int | None = Field(default=None, ge=0)
     install_cost: int | None = Field(default=None, ge=0)
