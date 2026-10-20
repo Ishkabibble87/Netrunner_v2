@@ -146,6 +146,7 @@ class InstallCardCommandRequest(ApiModel):
     card_instance_id: UUID
     server_id: ServerId | Literal["new_remote"] | None = None
     trash_card_instance_ids: list[UUID] = Field(default_factory=list)
+    host_card_instance_id: UUID | None = None
 
 
 class RezCardCommandRequest(ApiModel):
@@ -250,7 +251,7 @@ def game_command_from_request(request: PlayerCommandRequest) -> GameCommand:
     if isinstance(request, PlayCardCommandRequest):
         return PlayCard(request.card_instance_id, request.server_id)
     if isinstance(request, InstallCardCommandRequest):
-        return InstallCard(request.card_instance_id, request.server_id, tuple(request.trash_card_instance_ids))
+        return InstallCard(request.card_instance_id, request.server_id, tuple(request.trash_card_instance_ids), request.host_card_instance_id)
     if isinstance(request, RezCardCommandRequest):
         return RezCard(request.card_instance_id)
     if isinstance(request, UseCardAbilityCommandRequest):
@@ -296,7 +297,8 @@ def command_request_from_game(command: GameCommand | DiscardSelection) -> LegalA
         return PlayCardCommandRequest(type="play_card", card_instance_id=command.card_instance_id, server_id=command.server_id)
     if isinstance(command, InstallCard):
         return InstallCardCommandRequest(type="install_card", card_instance_id=command.card_instance_id,
-            server_id=command.server_id, trash_card_instance_ids=list(command.trash_card_instance_ids))
+            server_id=command.server_id, trash_card_instance_ids=list(command.trash_card_instance_ids),
+            host_card_instance_id=command.host_card_instance_id)
     if isinstance(command, RezCard):
         return RezCardCommandRequest(type="rez_card", card_instance_id=command.card_instance_id)
     if isinstance(command, UseCardAbility):
@@ -353,6 +355,7 @@ class InstalledCardView(ApiModel):
     controller_id: UUID
     rezzed: bool
     area: str
+    host_card_instance_id: UUID | None = None
     ice_distance_from_server: int | None
     face_up: bool
     counters: dict[str, int]
@@ -585,7 +588,7 @@ class InitialGameView(ApiModel):
             ),
             installed_cards=[InstalledCardView(
                 instance_id=c.instance_id, server_id=c.location.server.server_id if c.location.server else None,
-                controller_id=c.controller_id, rezzed=c.rezzed,
+                controller_id=c.controller_id, rezzed=c.rezzed, host_card_instance_id=c.location.host_card_instance_id,
                 area=c.location.server.area.value if c.location.server else "rig",
                 ice_distance_from_server=c.location.server.ice_distance_from_server if c.location.server else None,
                 face_up=bool(c.face_up), counters=c.counters,
@@ -659,4 +662,4 @@ class CardCatalogEntry(ApiModel):
     @classmethod
     def from_definition(cls, definition: CardDefinition) -> "CardCatalogEntry":
         return cls(**definition.model_dump(exclude={"play_instructions", "score_instructions", "install_instructions",
-                                                   "rez_instructions", "action_abilities", "trash_when_empty", "paid_abilities", "subroutines", "remote_strength_bonus", "triggered_abilities", "first_basic_draw_amount", "memory_bonus", "hand_size_bonus", "first_program_discount", "strength_per_icebreaker"}))
+                                                   "rez_instructions", "action_abilities", "trash_when_empty", "paid_abilities", "subroutines", "remote_strength_bonus", "triggered_abilities", "first_basic_draw_amount", "install_on_ice", "memory_bonus", "hand_size_bonus", "first_program_discount", "strength_per_icebreaker"}))

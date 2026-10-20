@@ -57,6 +57,24 @@ class TakeCredits(CardContentModel):
     amount: Annotated[int, Field(gt=0)] | Literal["all"]
 
 
+class PlaceVirusCounters(CardContentModel):
+    """Place counters on the source or the card named by the triggering fact."""
+
+    type: Literal["place_virus_counters"] = "place_virus_counters"
+    amount: int = Field(default=1, gt=0)
+    target: Literal["self", "installed_card"] = "self"
+
+
+class DerezHost(CardContentModel):
+    type: Literal["derez_host"] = "derez_host"
+    minimum_virus_counters: int = Field(gt=0)
+
+
+class GainCreditsPerVirus(CardContentModel):
+    type: Literal["gain_credits_per_virus"] = "gain_credits_per_virus"
+    amount: int = Field(gt=0)
+
+
 class GainAccessCredits(CardContentModel):
     """Gain one credit per access occurrence in the triggering run."""
 
@@ -75,6 +93,7 @@ class InitiateRun(CardContentModel):
     servers: tuple[Literal["hq", "rd", "archives"], ...] | None = None
     successful_draw: int = Field(default=0, ge=0)
     additional_accesses: int = Field(default=0, ge=0)
+    additional_accesses_per_virus: bool = False
     hosted_credits: int = Field(default=0, ge=0)
     unrun_this_turn: bool = False
     successful_take_credits: int = Field(default=0, ge=0)
@@ -84,7 +103,7 @@ class TrashSource(CardContentModel):
     type: Literal["trash_source"] = "trash_source"
 
 
-PlayInstruction = Annotated[GainCredits | GainAccessCredits | AdditionalAccesses | DrawCards | LoseClickIfAny | LoadCredits | TakeCredits | InitiateRun | TrashSource, Field(discriminator="type")]
+PlayInstruction = Annotated[PlaceVirusCounters | DerezHost | GainCreditsPerVirus | GainCredits | GainAccessCredits | AdditionalAccesses | DrawCards | LoseClickIfAny | LoadCredits | TakeCredits | InitiateRun | TrashSource, Field(discriminator="type")]
 
 
 class TriggeredAbility(CardContentModel):
@@ -94,7 +113,7 @@ class TriggeredAbility(CardContentModel):
     label: str = Field(min_length=1)
     trigger: Literal["turn_begin", "turn_end", "discard_end", "action", "advance", "install", "rez", "score", "empty", "run_success", "breach", "access_trash", "run_end"]
     scope: Literal["controller", "self", "any"] = "controller"
-    condition: Literal["previously_unadvanced", "facedown_archives"] | None = None
+    condition: Literal["previously_unadvanced", "facedown_archives", "installed_virus", "successful_run"] | None = None
     servers: tuple[Literal["hq", "rd", "archives"], ...] | None = None
     optional: bool = False
     once_per_turn: bool = False
@@ -107,17 +126,19 @@ class ActionAbility(CardContentModel):
 
     ability_id: str = Field(min_length=1)
     label: str = Field(min_length=1)
+    trash_cost: bool = False
     click_cost: int = Field(default=1, gt=0)
     once_per_turn: bool = False
     instructions: tuple[PlayInstruction, ...]
 
 
 class PaidAbility(CardContentModel):
-    """Breaker interfaces and encounter boosts with fixed or live-count amounts."""
+    """Paid encounter effects with credit or virus costs and authored targets."""
 
     ability_id: str = Field(min_length=1)
     label: str = Field(min_length=1)
-    type: Literal["boost_strength", "break_subroutines"]
+    type: Literal["boost_strength", "break_subroutines", "lower_ice_strength", "break_host_subroutine"]
+    virus_cost: int = Field(default=0, ge=0)
     credit_cost: int = Field(ge=0)
     amount: int = Field(gt=0)
     amount_per_icebreaker: bool = False
@@ -143,6 +164,7 @@ class AuthoredAbilities(CardContentModel):
     remote_strength_bonus: int = Field(default=0, ge=0)
     triggered_abilities: tuple[TriggeredAbility, ...] = ()
     first_basic_draw_amount: int | None = Field(default=None, gt=0)
+    install_on_ice: bool = False
     memory_bonus: int = Field(default=0, ge=0)
     hand_size_bonus: int = Field(default=0, ge=0)
     first_program_discount: int = Field(default=0, ge=0)
@@ -176,6 +198,7 @@ class CardDefinition(CardContentModel):
     remote_strength_bonus: int = Field(default=0, ge=0)
     triggered_abilities: tuple[TriggeredAbility, ...] = ()
     first_basic_draw_amount: int | None = Field(default=None, gt=0)
+    install_on_ice: bool = False
     memory_bonus: int = Field(default=0, ge=0)
     hand_size_bonus: int = Field(default=0, ge=0)
     first_program_discount: int = Field(default=0, ge=0)

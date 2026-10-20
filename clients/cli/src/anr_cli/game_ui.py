@@ -161,6 +161,8 @@ class GameScreen:
                     if card:
                         target = ("your rig" if action.get("server_id") is None else
                                   "new remote" if action["server_id"] == "new_remote" else self._server_label(action["server_id"]))
+                        if action.get("host_card_instance_id"):
+                            target = self._host_label(action["host_card_instance_id"])
                         trash_titles = [c["card"]["title"] for c in self.state.get("installed_cards", [])
                                         if c["instance_id"] in action.get("trash_card_instance_ids", []) and c.get("card")]
                         replacement = " · trash " + ", ".join(trash_titles) if trash_titles else ""
@@ -596,8 +598,20 @@ class GameScreen:
         for card in rig:
             title = card["card"]["title"] if card.get("card") else "Facedown card"
             owner = "Your" if card.get("controller_id") == self.you.get("player_id") else "Opponent's"
-            rows.append(f"{owner} rig: {title} · {card.get('counters', {}).get('credit', 0)} hosted credits")
+            rows.append(f"{owner} rig: {title}{self._installed_details(card)}")
         return rows
+
+    def _host_label(self, instance_id: str) -> str:
+        """Identify a host by its public position without revealing facedown ice."""
+        host = next(c for c in self.state.get("installed_cards", []) if c["instance_id"] == instance_id)
+        title = host["card"]["title"] if host.get("card") else "unrezzed ice"
+        return f"{title} at {self._server_label(host['server_id'])} · ice {host['ice_distance_from_server'] + 1}"
+
+    def _installed_details(self, card: dict[str, Any]) -> str:
+        details = "".join(f" · {amount} {kind} counters" for kind, amount in card.get("counters", {}).items())
+        if card.get("host_card_instance_id"):
+            details += f" · hosted on {self._host_label(card['host_card_instance_id'])}"
+        return details
 
     def _status_text(self) -> str:
         winner = self.state.get("winner")
@@ -761,7 +775,7 @@ class GameScreen:
                 MenuLevel(
                     "Rig",
                     "rig",
-                    [MenuChoice(f"{c['card']['title']} · {c.get('counters', {}).get('credit', 0)} hosted credits",
+                    [MenuChoice(f"{c['card']['title']}{self._installed_details(c)}",
                                 "installed_card", c["card"]) for c in cards] + [MenuChoice("Back", "back")],
                 )
             )

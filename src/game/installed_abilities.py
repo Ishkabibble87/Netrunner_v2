@@ -15,6 +15,7 @@ from content.cards.models import (
     InitiateRun,
 )
 
+from .card_movement import trash_installed_card
 from .commands import UseCardAbility
 from .models import (
     CardInstance,
@@ -105,6 +106,12 @@ def use_ability(state: GameState, player: PlayerState, command: UseCardAbility,
         start_run(state, command.server_id, definitions, source_card_id=card.instance_id,
                   source_ability_id=ability.ability_id,
                   successful_take_credits=run.successful_take_credits,
-                  successful_draw=run.successful_draw, additional_accesses=run.additional_accesses)
+                  successful_draw=run.successful_draw, additional_accesses=run.additional_accesses,
+                  additional_accesses_per_virus=run.additional_accesses_per_virus)
     else:
-        resolve_sequence(state, definitions, player, card, ability)
+        counters = None
+        if ability.trash_cost:
+            # CR 9.5.5: preserve hosted counters privately while the paid effect resolves.
+            counters = dict(card.counters)
+            trash_installed_card(state, card)
+        resolve_sequence(state, definitions, player, card, ability, set_aside_counters=counters)

@@ -182,12 +182,18 @@ def legal_actions_for(
             # replacement choices through the existing installation command.
             for count in range(len(programs) + 1):
                 for trash in combinations(programs, count):
-                    command = InstallCard(card.instance_id, trash_card_instance_ids=tuple(c.instance_id for c in trash))
-                    try:
-                        validate_install(state, player, command, definitions)
-                    except IllegalCommand:
-                        continue
-                    actions.append(command)
+                    definition = definitions.get(card.definition_id)
+                    hosts = (tuple(c.instance_id for c in state.card_instances.values()
+                                   if c.installed and c.location.server and c.location.server.area.value == "ice")
+                             if definition and definition.install_on_ice else (None,))
+                    for host_id in hosts:
+                        command = InstallCard(card.instance_id, trash_card_instance_ids=tuple(c.instance_id for c in trash),
+                                              host_card_instance_id=host_id)
+                        try:
+                            validate_install(state, player, command, definitions)
+                        except IllegalCommand:
+                            continue
+                        actions.append(command)
         if player.tags > 0 and player.credits >= 2:
             actions.append(RemoveTag())
     elif player.clicks_remaining >= 3:

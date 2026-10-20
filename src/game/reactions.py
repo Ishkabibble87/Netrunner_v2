@@ -87,6 +87,14 @@ def collect_fact(state: GameState, definitions: Mapping[str, CardDefinition], fa
                 continue
             if ability.scope == "self" and card.instance_id != fact.card_instance_id:
                 continue
+            if ability.condition == "installed_virus":
+                installed = state.card_instances.get(fact.card_instance_id)
+                installed_definition = definitions.get(installed.definition_id) if installed else None
+                if (not installed_definition or installed_definition.card_type.value != "program"
+                        or "Virus" not in installed_definition.subtypes):
+                    continue
+            if ability.condition == "successful_run" and (not state.run or not state.run.successful):
+                continue
             if ability.condition == "previously_unadvanced" and fact.previous_advancement != 0:
                 continue
             if ability.servers is not None and fact.server_id not in ability.servers:
@@ -129,7 +137,16 @@ def open_reactions(state: GameState, definitions: Mapping[str, CardDefinition],
 
 
 def checkpoint(state: GameState, definitions: Mapping[str, CardDefinition]) -> None:
-    """Pause for excess memory before collecting empty-counter conditions."""
+    """Clean up lost hosts, then pause for memory before empty-counter reactions."""
+    from .card_movement import trash_installed_card
+
+    while True:
+        orphaned = [c for c in state.card_instances.values() if c.location.host_card_instance_id
+                    and not state.card_instances[c.location.host_card_instance_id].installed]
+        if not orphaned:
+            break
+        for card in orphaned:
+            trash_installed_card(state, card)
     state.memory_trash_pending = memory_used(state, definitions) > memory_limit(state, state.runner, definitions)
     if state.memory_trash_pending:
         return
@@ -197,7 +214,8 @@ def settle_reactions(state: GameState, definitions: Mapping[str, CardDefinition]
             if condition_met:
                 source = state.card_instances[reaction.card_instance_id] if source_present(state, reaction) else None
                 before = state.model_dump() if reaction.once_per_turn else None
-                resolve_effect(state, player, instruction, source, reaction.fact)
+                resolve_effect(state, player, instruction, source, reaction.fact,
+                               set_aside_counters=reaction.set_aside_counters if reaction.set_aside_counters else None)
                 if reaction.once_per_turn and before != state.model_dump() and source_present(state, reaction):
                     state.card_instances[reaction.card_instance_id].ability_last_used_turn[reaction.ability_id] = state.turn.number
             checkpoint(state, definitions)
@@ -242,10 +260,12 @@ def pass_reactions(state: GameState, definitions: Mapping[str, CardDefinition]) 
 
 
 def resolve_sequence(state: GameState, definitions: Mapping[str, CardDefinition],
-                     player: PlayerState, card: CardInstance, ability: ActionAbility) -> None:
+                     player: PlayerState, card: CardInstance, ability: ActionAbility,
+                     *, set_aside_counters: dict[str, int] | None = None) -> None:
     """Start action effects without a choice, preserving instruction checkpoints."""
     reaction = make_reaction(state, card, ability.ability_id, ability.label,
         ability.instructions, RuleFact(type="action", player=player.role, card_instance_id=card.instance_id))
+    reaction.set_aside_counters = set_aside_counters or {}
     open_reactions(state, definitions, [reaction], auto_single=True)
 
 

@@ -68,11 +68,12 @@ class TrashPrograms:
 
 @dataclass(frozen=True)
 class InstallCard:
-    """Install a card; Runner cards have no server destination."""
+    """Install a card, optionally selecting a required host or replacement cards."""
 
     card_instance_id: UUID
     server_id: ServerId | Literal["new_remote"] | None = None
     trash_card_instance_ids: tuple[UUID, ...] = ()
+    host_card_instance_id: UUID | None = None
 
 
 @dataclass(frozen=True)
