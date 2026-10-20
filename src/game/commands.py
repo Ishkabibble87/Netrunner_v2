@@ -84,14 +84,16 @@ class ScoreAgenda:
 
 @dataclass(frozen=True)
 class PassPriority:
-    """Pass the current paid ability window; unsupported opposing choices auto-pass."""
+    """Pass paid priority or decline remaining optional reactions in this window."""
 
 
 @dataclass(frozen=True)
 class ResolveReaction:
-    """Choose the next pending mandatory scoring reaction to resolve."""
+    """Resolve or decline one pending reaction; source-only selection is legacy."""
 
     card_instance_id: UUID
+    reaction_id: UUID | None = None
+    decline: bool = False
 
 
 @dataclass(frozen=True)

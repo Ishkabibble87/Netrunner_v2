@@ -10,6 +10,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from content.cards.models import PlayInstruction
+
 
 class DomainModel(BaseModel):
     """Shared Pydantic configuration for game-domain models."""
@@ -153,6 +155,7 @@ class CardInstance(DomainModel):
     controller_id: UUID | None = None
     location: ZoneLocation
     counters: dict[str, NonNegativeCounter] = Field(default_factory=dict)
+    loaded_counter_types: set[str] = Field(default_factory=set)
     face_up: bool | None = Field(
         default=None,
         description="Face status when the current zone or game state uses it; otherwise None",
@@ -241,7 +244,8 @@ class TurnState(DomainModel):
     number: int = Field(ge=1)
     active_player: PlayerRole
     phase: TurnPhase
-    step: Literal["start", "mandatory_draw", "before_action", "action", "discard", "end"] = "action"
+    step: Literal["start", "turn_begin", "mandatory_draw", "before_action", "action", "discard", "end", "next_turn"] = "action"
+    occurrences: dict[str, int] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def runner_has_no_draw_phase(self) -> "TurnState":
@@ -250,16 +254,51 @@ class TurnState(DomainModel):
         return self
 
 
+class RuleFact(DomainModel):
+    """An ephemeral rules occurrence, separate from commands and public updates."""
+
+    type: str
+    player: PlayerRole
+    card_instance_id: UUID | None = None
+    previous_advancement: int | None = None
+    action: str | None = None
+
+
+class PendingReaction(DomainModel):
+    """One occurrence of an ability, retaining its source and triggering context."""
+
+    reaction_id: UUID
+    card_instance_id: UUID
+    ability_id: str
+    label: str
+    player: PlayerRole
+    fact: RuleFact
+    source_location: ZoneLocation
+    instructions: tuple[PlayInstruction, ...]
+    optional: bool = False
+    once_per_turn: bool = False
+    condition: str | None = None
+
+
+class EffectContinuation(DomainModel):
+    """The next instruction of a resolving ability, suspended by nested reactions."""
+
+    reaction: PendingReaction
+    next_instruction: int = 0
+
+
 class PriorityWindow(DomainModel):
-    """A paid window or reaction, continuing a turn or suspended run.
+    """Paid priority or a fixed reaction batch, with a resumable instruction.
 
     Players without supported choices pass automatically. Empty scoring windows
     remain visible while Corp cards are installed, concealing agenda eligibility.
+    Nested reactions retain this entire window on GameState.suspended_windows.
     """
 
     kind: Literal["paid", "reaction"]
     player: PlayerRole
-    pending_card_ids: list[UUID] = Field(default_factory=list)
+    reactions: list[PendingReaction] = Field(default_factory=list)
+    resolving: EffectContinuation | None = None
     run_continuation: Literal["movement", "breach", "approach", "encounter", "resolve_subroutines", "approach_next"] | None = None
     rez_allowed: bool = True
     opponent_passed: bool = False
@@ -300,6 +339,8 @@ class GameState(DomainModel):
     turn: TurnState | None = None
     winner: PlayerRole | None = None
     window: PriorityWindow | None = None
+    suspended_windows: list[PriorityWindow | None] = Field(default_factory=list)
+    pending_action_fact: RuleFact | None = None
     run: RunState | None = None
     servers: list[ServerId] = Field(default_factory=lambda: list(CentralServer))
     card_instances: dict[UUID, CardInstance] = Field(default_factory=dict)
@@ -377,7 +418,7 @@ class GameState(DomainModel):
                 raise ValueError("A run requires the Runner action phase without another priority window")
             if self.run.server_id not in self.servers:
                 raise ValueError("The attacked server must exist during a run")
-            if self.window is not None and (self.window.kind != "paid" or self.window.run_continuation is None):
+            if self.window is not None and self.window.kind == "paid" and self.window.run_continuation is None:
                 raise ValueError("A run window must have a supported run continuation")
             run = self.run
             if run.source_event_id is not None:

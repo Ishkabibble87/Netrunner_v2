@@ -132,7 +132,7 @@ def resolve_run_command(state: GameState, command, definitions: Mapping[str, Car
                 destination = ZoneLocation(zone=CardZone.SCORE_AREA, player_id=state.runner.player_id)
             state.card_instances[card.instance_id] = card.model_copy(update={
                 "location": destination, "installed": False, "rezzed": False,
-                "face_up": True, "counters": {}, "controller_id": None, "ability_last_used_turn": {},
+                "face_up": True, "counters": {}, "loaded_counter_types": set(), "controller_id": None, "ability_last_used_turn": {},
             })
             if was_deck:
                 deck = sorted((c for c in state.card_instances.values()

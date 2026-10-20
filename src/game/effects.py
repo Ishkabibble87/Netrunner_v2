@@ -11,20 +11,39 @@ from content.cards.models import (
     LoseClickIfAny,
     PlayInstruction,
     TakeCredits,
+    TrashSource,
 )
 
 from .card_movement import draw_from_deck
-from .models import CardInstance, GameState, PlayerRole, PlayerState
+from .models import (
+    CardInstance,
+    CardZone,
+    GameState,
+    PlayerRole,
+    PlayerState,
+    ZoneLocation,
+)
 
 
 def resolve_effect(state: GameState, player: PlayerState, instruction: PlayInstruction,
                    source: CardInstance | None = None) -> None:
     """Resolve one effect fully before the next instruction or turn transition."""
-    if isinstance(instruction, (LoadCredits, TakeCredits)):
+    if isinstance(instruction, TrashSource):
+        if source is not None:
+            state.card_instances[source.instance_id] = source.model_copy(update={
+                "installed": False, "rezzed": False, "face_up": True,
+                "controller_id": None, "counters": {}, "loaded_counter_types": set(), "ability_last_used_turn": {},
+                "location": ZoneLocation(zone=CardZone.DISCARD_PILE, player_id=source.owner_id),
+            })
+            if state.run is None:
+                from .installation import remove_empty_remotes
+                remove_empty_remotes(state)
+    elif isinstance(instruction, (LoadCredits, TakeCredits)):
         if source is None:
-            raise ValueError("A hosted-credit instruction requires its source card")
+            return  # A resolving ability cannot act on its source after a zone change.
         hosted = source.counters.get("credit", 0)
         if isinstance(instruction, LoadCredits):
+            source.loaded_counter_types.add("credit")
             source.counters["credit"] = hosted + instruction.amount
         else:
             amount = min(hosted, instruction.amount)

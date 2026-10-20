@@ -104,7 +104,7 @@ def install_card(state: GameState, player: PlayerState, command: InstallCard,
         for instance_id in command.trash_card_instance_ids:
             old = state.card_instances[instance_id]
             state.card_instances[instance_id] = old.model_copy(update={
-                "installed": False, "rezzed": False, "face_up": True, "counters": {},
+                "installed": False, "rezzed": False, "face_up": True, "counters": {}, "loaded_counter_types": set(),
                 "ability_last_used_turn": {}, "controller_id": None,
                 "location": ZoneLocation(zone=CardZone.DISCARD_PILE, player_id=player.player_id)})
         player.credits -= cost
@@ -114,7 +114,7 @@ def install_card(state: GameState, player: PlayerState, command: InstallCard,
             "location": ZoneLocation(zone=CardZone.PLAY_AREA),
         })
         state.card_instances[card.instance_id] = card
-        resolve_lifecycle(state, player, card, definition.install_instructions, definition)
+        resolve_lifecycle(state, player, card, definitions, trigger="install")
         return
     target = command.server_id
     if target == "new_remote":
@@ -123,7 +123,7 @@ def install_card(state: GameState, player: PlayerState, command: InstallCard,
     for instance_id in command.trash_card_instance_ids:
         card = state.card_instances[instance_id]
         state.card_instances[instance_id] = card.model_copy(update={
-            "installed": False, "rezzed": False, "counters": {}, "ability_last_used_turn": {},
+            "installed": False, "rezzed": False, "counters": {}, "loaded_counter_types": set(), "ability_last_used_turn": {},
             "controller_id": None,
             "location": ZoneLocation(zone=CardZone.DISCARD_PILE, player_id=player.player_id)})
     ice = sorted((c for c in state.card_instances.values() if c.installed and c.location.server
@@ -139,6 +139,9 @@ def install_card(state: GameState, player: PlayerState, command: InstallCard,
             server_id=target, area=area, ice_distance_from_server=len(ice) if area is ServerArea.ICE else None))})
     player.credits -= cost
     player.clicks_remaining -= 1
+
+    resolve_lifecycle(state, player, state.card_instances[card.instance_id],
+                      definitions, trigger="install")
 
 
 def remove_empty_remotes(state: GameState) -> None:

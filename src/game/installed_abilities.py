@@ -12,19 +12,17 @@ from content.cards.models import (
     CardDefinition,
     CardSide,
     CardType,
-    PlayInstruction,
 )
 
 from .commands import UseCardAbility
-from .effects import resolve_effect
 from .models import (
     CardInstance,
-    CardZone,
     GameState,
     PlayerRole,
     PlayerState,
-    ZoneLocation,
+    RuleFact,
 )
+from .reactions import emit_fact, resolve_sequence
 from .setup import IllegalCommand
 
 
@@ -61,11 +59,10 @@ def validate_rez(state: GameState, player: PlayerState, instance_id: UUID,
 
 
 def resolve_lifecycle(state: GameState, player: PlayerState, card: CardInstance,
-                      instructions: tuple[PlayInstruction, ...] | None, definition: CardDefinition) -> None:
-    """Resolve a sole mandatory reaction and its empty-card checkpoint."""
-    for instruction in instructions or ():
-        resolve_effect(state, player, instruction, card)
-    trash_if_empty(state, card, definition)
+                      definitions: Mapping[str, CardDefinition], *, trigger: str) -> None:
+    """Collect lifecycle effects alongside all abilities observing that occurrence."""
+    emit_fact(state, definitions, RuleFact(type=trigger, player=player.role,
+              card_instance_id=card.instance_id), auto_single=True)
 
 
 def validate_ability(state: GameState, player: PlayerState, command: UseCardAbility,
@@ -88,19 +85,7 @@ def validate_ability(state: GameState, player: PlayerState, command: UseCardAbil
 def use_ability(state: GameState, player: PlayerState, command: UseCardAbility,
                 definitions: Mapping[str, CardDefinition]) -> None:
     """Pay once and transfer credits before checking automatic trashing."""
-    card, definition, ability = validate_ability(state, player, command, definitions)
+    card, _, ability = validate_ability(state, player, command, definitions)
     player.clicks_remaining -= ability.click_cost
     card.ability_last_used_turn[ability.ability_id] = state.turn.number
-    resolve_lifecycle(state, player, card, ability.instructions, definition)
-
-
-def trash_if_empty(state: GameState, card: CardInstance, definition: CardDefinition) -> None:
-    """Apply the active 'when empty' condition (CR 9.6, 10.3)."""
-    if (definition.trash_when_empty and card.installed
-            and (definition.side is CardSide.RUNNER or card.rezzed)
-            and card.counters.get("credit", 0) == 0):
-        state.card_instances[card.instance_id] = card.model_copy(update={
-            "location": ZoneLocation(zone=CardZone.DISCARD_PILE, player_id=card.owner_id),
-            "installed": False, "rezzed": False, "face_up": True,
-            "controller_id": None, "counters": {}, "ability_last_used_turn": {},
-        })
+    resolve_sequence(state, definitions, player, card, ability)

@@ -182,11 +182,16 @@ class GameScreen:
                             suffix += " · subroutines " + ", ".join(str(i + 1) for i in targets)
                         label = f"{title}: {ability}{suffix}"
                     choices.append(MenuChoice(label, "action", dict(action)))
-                elif action_type in {"advance_card", "score_agenda", "resolve_reaction"} and self.submit_action is not None:
+                elif action_type == "resolve_reaction" and self.submit_action is not None:
+                    reaction = next((r for r in self.state.get("reactions", [])
+                                     if r["reaction_id"] == action.get("reaction_id")), {})
+                    verb = "Decline" if action.get("decline") else "Resolve"
+                    choices.append(MenuChoice(f"{verb} {reaction.get('label', 'ability')}", "action", dict(action)))
+                elif action_type in {"advance_card", "score_agenda"} and self.submit_action is not None:
                     installed = [c["card"] for c in self.state.get("installed_cards", []) if c.get("card")]
                     scored = self.state.get("you", {}).get("score_area", [])
                     card = next((c for c in installed + scored if c["instance_id"] == action["card_instance_id"]), {})
-                    verb = {"advance_card": "Advance", "score_agenda": "Score", "resolve_reaction": "Resolve scoring ability:"}[action_type]
+                    verb = {"advance_card": "Advance", "score_agenda": "Score"}[action_type]
                     suffix = " · 1 credit" if action_type == "advance_card" else ""
                     choices.append(MenuChoice(f"{verb} {card.get('title', 'agenda')}{suffix}", "action", dict(action)))
                 elif action_type == "discard_cards" and self.submit_action is not None:
@@ -195,7 +200,7 @@ class GameScreen:
                     label = {
                         "pass_priority": "Pass priority",
                         "gain_credit": "Gain 1 credit",
-                        "draw_card": "Draw 1 card",
+                        "draw_card": "Draw cards · 1 click",
                         "remove_tag": "Remove 1 tag · 2 credits",
                         "purge_virus_counters": "Purge virus counters · 3 clicks",
                     }.get(action_type)
@@ -591,7 +596,7 @@ class GameScreen:
         decision = self.state.get("decision") or {}
         if decision.get("type") in {"paid_ability_window", "resolve_reaction"}:
             who = "You" if decision["player"] == self.viewer_role else str(decision["player"]).title()
-            return f"{who}: " + ("paid ability window · act or pass" if decision["type"] == "paid_ability_window" else "resolve scoring reaction")
+            return f"{who}: " + ("paid ability window · act or pass" if decision["type"] == "paid_ability_window" else "resolve reaction")
         if decision.get("type") == "discard_to_hand_limit":
             who = "You" if decision["player"] == self.viewer_role else str(decision["player"]).title()
             return f"{who} must discard {decision['cards_to_discard']} cards"

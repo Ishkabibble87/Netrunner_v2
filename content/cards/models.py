@@ -67,7 +67,25 @@ class InitiateRun(CardContentModel):
     hosted_credits: int = Field(default=0, ge=0)
 
 
-PlayInstruction = Annotated[GainCredits | DrawCards | LoseClickIfAny | LoadCredits | TakeCredits | InitiateRun, Field(discriminator="type")]
+class TrashSource(CardContentModel):
+    type: Literal["trash_source"] = "trash_source"
+
+
+PlayInstruction = Annotated[GainCredits | DrawCards | LoseClickIfAny | LoadCredits | TakeCredits | InitiateRun | TrashSource, Field(discriminator="type")]
+
+
+class TriggeredAbility(CardContentModel):
+    """A reaction to a rule fact, with authored conditions and usage limits."""
+
+    ability_id: str = Field(min_length=1)
+    label: str = Field(min_length=1)
+    trigger: Literal["turn_begin", "turn_end", "discard_end", "action", "advance", "install", "rez", "score", "empty"]
+    scope: Literal["controller", "self", "any"] = "controller"
+    condition: Literal["previously_unadvanced", "facedown_archives"] | None = None
+    optional: bool = False
+    once_per_turn: bool = False
+    first_each_turn: bool = False
+    instructions: tuple[PlayInstruction, ...]
 
 
 class ActionAbility(CardContentModel):
@@ -108,6 +126,8 @@ class AuthoredAbilities(CardContentModel):
     paid_abilities: tuple[PaidAbility, ...] = ()
     subroutines: tuple[EndRun, ...] | None = None
     remote_strength_bonus: int = Field(default=0, ge=0)
+    triggered_abilities: tuple[TriggeredAbility, ...] = ()
+    first_basic_draw_amount: int | None = Field(default=None, gt=0)
 
 
 class CardDefinition(CardContentModel):
@@ -135,6 +155,8 @@ class CardDefinition(CardContentModel):
     paid_abilities: tuple[PaidAbility, ...] = ()
     subroutines: tuple[EndRun, ...] | None = None
     remote_strength_bonus: int = Field(default=0, ge=0)
+    triggered_abilities: tuple[TriggeredAbility, ...] = ()
+    first_basic_draw_amount: int | None = Field(default=None, gt=0)
 
     play_cost: int | None = Field(default=None, ge=0)
     install_cost: int | None = Field(default=None, ge=0)

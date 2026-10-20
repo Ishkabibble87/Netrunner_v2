@@ -72,6 +72,7 @@ class GameProgressTests(unittest.TestCase):
         self.use_installed_economy(session)
         self.break_through_ice(session)
         self.run_from_events(session)
+        self.use_turn_triggered_economy(session)
 
     def select_and_parse_deck(self) -> DeckSelection:
         deck = load_nrdb_deck(
@@ -211,7 +212,8 @@ class GameProgressTests(unittest.TestCase):
         self.assertEqual(self.cards_in_zone(gained, player_id, CardZone.DECK),
                          self.cards_in_zone(drawn, player_id, CardZone.DECK))
         self.assertEqual(gained.runner, before.runner)
-        self.assertEqual(gained.turn, before.turn)
+        self.assertEqual(gained.turn.model_dump(exclude={"occurrences"}),
+                         before.turn.model_dump(exclude={"occurrences"}))
 
     def discard_and_continue_after_opponent_turn(self, session: GameSession) -> None:
         """Finish the Corp turn, discard together, and let the training AI act."""
@@ -657,6 +659,55 @@ class GameProgressTests(unittest.TestCase):
         self.assertIsNone(session.state.run)
         self.assertEqual(session.state.card_instances[overclock].location.zone, CardZone.DISCARD_PILE)
         self.assertEqual(session.state.card_instances[overclock].counters, {})
+
+    def use_turn_triggered_economy(self, session):
+        """Continue the core game through installation, loading and a turn-start payout."""
+        runner = PlayerRole.RUNNER
+
+        def submit(role, command):
+            player = session.state.corp if role is PlayerRole.CORP else session.state.runner
+            self.sessions.submit(session.state.game_id, session.player_tokens[player.player_id], command,
+                                 card_definitions=self.cards)
+
+        def action_for_runner():
+            for _ in range(100):
+                state = session.state
+                if state.window:
+                    actions = legal_actions_for(state,
+                        (state.corp if state.window.player is PlayerRole.CORP else state.runner).player_id, self.cards)
+                    submit(state.window.player, actions[0] if state.window.kind == "reaction" else PassPriority())
+                elif state.turn.phase is TurnPhase.DISCARD:
+                    player = state.corp if state.turn.active_player is PlayerRole.CORP else state.runner
+                    selection, = legal_actions_for(state, player.player_id, self.cards)
+                    choices = sorted(selection.eligible_card_instance_ids,
+                        key=lambda i: self.cards[state.card_instances[i].definition_id].title == "Smartware Distributor")
+                    submit(player.role, DiscardCards(tuple(choices[:selection.required_count])))
+                elif state.turn.active_player is runner:
+                    return
+                else:
+                    submit(PlayerRole.CORP, GainCredit())
+            self.fail("Runner action did not arrive")
+
+        for _ in range(30):
+            action_for_runner()
+            smartware = next((c.instance_id for c in self.cards_in_zone(session.state,
+                session.state.runner.player_id, CardZone.HAND).values()
+                if self.cards[c.definition_id].title == "Smartware Distributor"), None)
+            if smartware:
+                break
+            submit(runner, DrawCard())
+        self.assertIsNotNone(smartware)
+        submit(runner, InstallCard(smartware))
+        action_for_runner()
+        submit(runner, UseCardAbility(smartware, "load_credits"))
+        self.assertEqual(session.state.card_instances[smartware].counters["credit"], 3)
+        turn = session.state.turn.number
+        while session.state.turn.number == turn:
+            action_for_runner()
+            if session.state.turn.number == turn:
+                submit(runner, GainCredit())
+        action_for_runner()
+        self.assertEqual(session.state.card_instances[smartware].counters["credit"], 2)
 
     @staticmethod
     def cards_in_zone(state, player_id, zone):
