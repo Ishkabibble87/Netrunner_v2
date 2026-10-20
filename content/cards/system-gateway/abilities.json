@@ -779,5 +779,233 @@
         ]
       }
     ]
+  },
+  "30051": {
+    "triggered_abilities": [
+      {
+        "ability_id": "reality_plus",
+        "label": "Reality plus",
+        "trigger": "take_tags",
+        "instructions": [
+          {
+            "type": "choose_effect",
+            "player": "corp",
+            "options": [
+              {
+                "option_id": "gain_credits",
+                "label": "Gain 2 credits",
+                "credit_cost": 0,
+                "instructions": [
+                  {
+                    "type": "gain_credits",
+                    "amount": 2
+                  }
+                ]
+              },
+              {
+                "option_id": "draw_cards",
+                "label": "Draw 2 cards",
+                "credit_cost": 0,
+                "instructions": [
+                  {
+                    "type": "draw_cards",
+                    "amount": 2
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "scope": "any",
+        "first_each_turn": true
+      }
+    ]
+  },
+  "30052": {
+    "score_instructions": [
+      {
+        "type": "give_tags",
+        "amount": 1
+      }
+    ],
+    "triggered_abilities": [
+      {
+        "ability_id": "headline_stolen",
+        "label": "Headline stolen",
+        "trigger": "steal",
+        "instructions": [
+          {
+            "type": "give_tags",
+            "amount": 1
+          }
+        ],
+        "scope": "self"
+      }
+    ]
+  },
+  "30054": {
+    "rez_instructions": [],
+    "triggered_abilities": [
+      {
+        "ability_id": "funhouse_encounter",
+        "label": "Funhouse encounter",
+        "trigger": "encounter",
+        "instructions": [
+          {
+            "type": "choose_effect",
+            "player": "runner",
+            "options": [
+              {
+                "option_id": "take_tag",
+                "label": "Take 1 tag to continue the run",
+                "credit_cost": 0,
+                "instructions": [
+                  {
+                    "type": "give_tags",
+                    "amount": 1
+                  }
+                ]
+              },
+              {
+                "option_id": "end_run",
+                "label": "End the run",
+                "credit_cost": 0,
+                "instructions": [
+                  {
+                    "type": "end_run"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "scope": "self"
+      }
+    ],
+    "subroutines": [
+      {
+        "type": "effects",
+        "label": "Give 1 tag unless the Runner pays 4 credits",
+        "instructions": [
+          {
+            "type": "choose_effect",
+            "player": "runner",
+            "options": [
+              {
+                "option_id": "pay",
+                "label": "Pay 4 credits to avoid 1 tag",
+                "credit_cost": 4,
+                "instructions": []
+              },
+              {
+                "option_id": "take_tag",
+                "label": "Take 1 tag",
+                "credit_cost": 0,
+                "instructions": [
+                  {
+                    "type": "give_tags",
+                    "amount": 1
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "30055": {
+    "rez_instructions": [],
+    "triggered_abilities": [
+      {
+        "ability_id": "ping_rez",
+        "label": "Ping rez",
+        "trigger": "rez",
+        "instructions": [
+          {
+            "type": "give_tags",
+            "amount": 1
+          }
+        ],
+        "scope": "self",
+        "condition": "run_on_source_server"
+      }
+    ],
+    "subroutines": [
+      {
+        "type": "end_run"
+      }
+    ]
+  },
+  "30057": {
+    "play_requirement": "successful_run_last_turn",
+    "play_instructions": [
+      {
+        "type": "choose_effect",
+        "player": "runner",
+        "options": [
+          {
+            "option_id": "pay",
+            "label": "Pay 8 credits to avoid 1 tag",
+            "credit_cost": 8,
+            "instructions": []
+          },
+          {
+            "option_id": "take_tag",
+            "label": "Take 1 tag",
+            "credit_cost": 0,
+            "instructions": [
+              {
+                "type": "give_tags",
+                "amount": 1
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "30058": {
+    "rez_instructions": [],
+    "triggered_abilities": [
+      {
+        "ability_id": "amaze_run_end",
+        "label": "Amaze run end",
+        "trigger": "run_end",
+        "instructions": [
+          {
+            "type": "give_tags",
+            "amount": 2
+          }
+        ],
+        "scope": "any",
+        "condition": "agenda_stolen_here",
+        "persistent": true
+      }
+    ]
+  },
+  "30063": {
+    "rez_instructions": [],
+    "subroutines": [
+      {
+        "type": "effects",
+        "label": "Give 1 tag",
+        "instructions": [
+          {
+            "type": "give_tags",
+            "amount": 1
+          }
+        ]
+      },
+      {
+        "type": "end_run"
+      },
+      {
+        "type": "end_run"
+      }
+    ]
+  },
+  "30065": {
+    "play_requirement": "tagged"
   }
 }

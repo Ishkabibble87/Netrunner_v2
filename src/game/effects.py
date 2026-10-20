@@ -1,4 +1,4 @@
-"""Execute the small set of immediate, ordered instructions supported by cards.
+"""Execute authored instructions, suspending for choices and nested reactions.
 
 Effects run against a private working snapshot. Draws reuse the same movement
 helper as basic actions; no printed prose is interpreted at runtime.
@@ -6,12 +6,15 @@ helper as basic actions; no printed prose is interpreted at runtime.
 
 from content.cards.models import (
     AdditionalAccesses,
+    ChooseEffect,
     DealDamage,
     DerezHost,
     DrawCards,
+    EndRunEffect,
     GainAccessCredits,
     GainCredits,
     GainCreditsPerVirus,
+    GiveTags,
     LoadCredits,
     LoseClickIfAny,
     PlaceVirusCounters,
@@ -34,9 +37,20 @@ from .models import (
 
 def resolve_effect(state: GameState, player: PlayerState, instruction: PlayInstruction,
                    source: CardInstance | None = None, fact: RuleFact | None = None,
-                   *, set_aside_counters: dict[str, int] | None = None) -> tuple[CardInstance, ...] | None:
-    """Resolve one effect fully before the next instruction or turn transition."""
-    if isinstance(instruction, DealDamage):
+                   *, set_aside_counters: dict[str, int] | None = None,
+                   definitions=None) -> tuple[CardInstance, ...] | None:
+    """Resolve one instruction or suspend its parent until its decision finishes."""
+    if isinstance(instruction, GiveTags):
+        from .tags import give_tags
+        give_tags(state, instruction.amount, definitions or {})
+    elif isinstance(instruction, ChooseEffect):
+        from .choices import open_choice
+        open_choice(state, instruction, source, fact)
+    elif isinstance(instruction, EndRunEffect):
+        from .runs import end_run
+        state.suspended_windows.clear()
+        end_run(state, definitions or {})
+    elif isinstance(instruction, DealDamage):
         counters = set_aside_counters if set_aside_counters is not None else (source.counters if source else {})
         amount = instruction.amount
         if instruction.per_advancement:
@@ -54,7 +68,8 @@ def resolve_effect(state: GameState, player: PlayerState, instruction: PlayInstr
     elif isinstance(instruction, TaggedDamage):
         if state.runner.tags:
             return deal_damage(state, instruction.amount, "meat")
-        state.runner.tags += 1
+        from .tags import give_tags
+        give_tags(state, 1, definitions or {})
     elif isinstance(instruction, PlaceVirusCounters):
         target = source if instruction.target == "self" else (
             state.card_instances.get(fact.card_instance_id) if fact else None)

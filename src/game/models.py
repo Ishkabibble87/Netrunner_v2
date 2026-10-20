@@ -10,7 +10,7 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from content.cards.models import PlayInstruction
+from content.cards.models import ChooseEffect, PlayInstruction
 
 
 class DomainModel(BaseModel):
@@ -247,6 +247,7 @@ class TurnState(DomainModel):
     step: Literal["start", "turn_begin", "mandatory_draw", "before_action", "action", "discard", "end", "next_turn"] = "action"
     occurrences: dict[str, int] = Field(default_factory=dict)
     servers_run: set[ServerId] = Field(default_factory=set)
+    successful_run: bool = False
     printed_agenda_points_scored: int = Field(default=0, ge=0)
 
     @model_validator(mode="after")
@@ -287,6 +288,8 @@ class PendingReaction(DomainModel):
     optional: bool = False
     once_per_turn: bool = False
     condition: str | None = None
+    persistent: bool = False
+    discard_after_resolution: bool = False
 
 
 class EffectContinuation(DomainModel):
@@ -297,14 +300,18 @@ class EffectContinuation(DomainModel):
 
 
 class PriorityWindow(DomainModel):
-    """Paid priority or a fixed reaction batch, with a resumable instruction.
+    """Paid priority, a reaction batch, or an authored effect decision.
 
     Players without supported choices pass automatically. Empty scoring windows
     remain visible while Corp cards are installed, concealing agenda eligibility.
-    Nested reactions retain this entire window on GameState.suspended_windows.
+    Nested reactions and choices retain this entire window on the suspension
+    stack, including the next instruction of the resolving parent ability.
     """
 
-    kind: Literal["paid", "reaction"]
+    kind: Literal["paid", "reaction", "choice"]
+    choice: ChooseEffect | None = None
+    choice_source_id: UUID | None = None
+    choice_fact: RuleFact | None = None
     player: PlayerRole
     reactions: list[PendingReaction] = Field(default_factory=list)
     resolving: EffectContinuation | None = None
@@ -328,10 +335,11 @@ class RunState(DomainModel):
     successful_take_credits: int = Field(default=0, ge=0)
     access_count: int = Field(default=0, ge=0)
     agendas_stolen: int = Field(default=0, ge=0)
-    pending_step: Literal["breach", "access_choices", "finish_access", "cleanup"] | None = None
+    pending_step: Literal["breach", "access_choices", "finish_access", "encounter_window", "subroutines", "cleanup"] | None = None
     server_id: ServerId
     phase: Literal["initiation", "approach", "encounter", "movement", "success", "breach", "access", "subroutine_choice", "ended"] = "movement"
     delayed_reactions: list[PendingReaction] = Field(default_factory=list)
+    persistent_sources: dict[UUID, ZoneLocation] = Field(default_factory=dict)
     next_subroutine: int = Field(default=0, ge=0)
     remaining_ice_ids: list[UUID] = Field(default_factory=list)
     current_ice_id: UUID | None = None
@@ -364,6 +372,7 @@ class GameState(DomainModel):
     pending_action_fact: RuleFact | None = None
     memory_trash_pending: bool = False
     run: RunState | None = None
+    runner_last_turn_successful: bool = False
     servers: list[ServerId] = Field(default_factory=lambda: list(CentralServer))
     card_instances: dict[UUID, CardInstance] = Field(default_factory=dict)
 
@@ -490,5 +499,5 @@ class PendingDecision(DomainModel):
     """Public decision context, excluding private cards and executable choices."""
 
     player: PlayerRole
-    type: Literal["choose_opening_hand", "choose_action", "discard_to_hand_limit", "paid_ability_window", "resolve_reaction", "continue_run", "choose_access", "resolve_access", "trash_for_memory"]
+    type: Literal["choose_opening_hand", "choose_action", "discard_to_hand_limit", "paid_ability_window", "resolve_reaction", "choose_effect", "continue_run", "choose_access", "resolve_access", "trash_for_memory"]
     cards_to_discard: int | None = None

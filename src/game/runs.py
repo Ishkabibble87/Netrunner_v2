@@ -11,7 +11,9 @@ from random import SystemRandom
 from content.cards.models import (
     CardDefinition,
     CardType,
+    ChooseEffect,
     DrawCards,
+    GiveTags,
     InitiateRun,
     TakeCredits,
 )
@@ -36,6 +38,7 @@ from .reactions import (
     emit_fact,
     make_reaction,
     open_reactions,
+    resolve_instructions,
     source_present,
 )
 from .setup import IllegalCommand
@@ -144,6 +147,10 @@ def advance_run(state: GameState, definitions: Mapping[str, CardDefinition]) -> 
         state.run.pending_step = None
         if step == "breach":
             begin_breach(state, definitions)
+        elif step == "encounter_window":
+            run_window(state, "resolve_subroutines", definitions, rez_allowed=False)
+        elif step == "subroutines":
+            resolve_subroutines(state, definitions)
         elif step == "finish_access":
             state.run.current_card_id = None
             state.run.phase = "breach"
@@ -206,6 +213,9 @@ def resolve_run_command(state: GameState, command, definitions: Mapping[str, Car
             if command.trash:
                 cost = definition.trash_cost
                 spend_runner_credits(state, cost)
+                # CR 9.12.5: capture persistence simultaneously with access trashing.
+                if card.rezzed and any(a.persistent for a in definition.triggered_abilities):
+                    run.persistent_sources[card.instance_id] = card.location.model_copy(deep=True)
                 destination = ZoneLocation(zone=CardZone.DISCARD_PILE, player_id=state.corp.player_id)
             else:
                 run.agendas_stolen += 1
@@ -230,12 +240,15 @@ def resolve_run_command(state: GameState, command, definitions: Mapping[str, Car
         run.pending_step = "finish_access"
         if command.trash:
             emit_fact(state, definitions, run_fact(state, "access_trash", card_instance_id=card.instance_id))
+        elif definition.card_type is CardType.AGENDA:
+            emit_fact(state, definitions, run_fact(state, "steal", card_instance_id=card.instance_id), auto_single=True)
 
 
 def begin_success(state: GameState, definitions: Mapping[str, CardDefinition]) -> None:
     """Resolve successful-run abilities before the breach begins (CR 6.9.5a)."""
     run = state.run
     run.successful = True
+    state.turn.successful_run = True
     run.phase = "success"
     run.pending_step = "breach"
     fact = run_fact(state, "run_success")
@@ -323,7 +336,8 @@ def resume_run(state, continuation, definitions):
             run.broken_subroutine_indices = []
             run.next_subroutine = 0
             run.strength_boosts = {}
-            run_window(state, "resolve_subroutines", definitions, rez_allowed=False)
+            run.pending_step = "encounter_window"
+            emit_fact(state, definitions, run_fact(state, "encounter", card_instance_id=ice.instance_id), auto_single=True)
         else:
             enter_movement(state, definitions)
     elif continuation == "resolve_subroutines":
@@ -342,7 +356,7 @@ def enter_movement(state, definitions):
 
 
 def resolve_subroutines(state, definitions):
-    """Resolve unbroken subroutines in order, resuming after Karuna's decision.
+    """Resolve unbroken subroutines, resuming after tag and jack-out decisions.
 
     The cursor advances before a choice so declining to jack out cannot replay
     damage. Damage packets return their trashed cards for Diviner's cost check.
@@ -360,8 +374,16 @@ def resolve_subroutines(state, definitions):
             end_run(state, definitions)
             return
         trashed = []
+        if any(isinstance(i, (GiveTags, ChooseEffect)) for i in subroutine.instructions):
+            run.pending_step = "subroutines"
+            resolve_instructions(state, definitions, state.corp, ice, subroutine.instructions,
+                                 f"subroutine_{index}", subroutine.label)
+            if state.window is not None or state.run is None or state.run.phase == "ended":
+                return
+            run.pending_step = None
+            continue
         for instruction in subroutine.instructions:
-            trashed.extend(resolve_effect(state, state.corp, instruction, ice) or ())
+            trashed.extend(resolve_effect(state, state.corp, instruction, ice, definitions=definitions) or ())
             if state.winner is not None:
                 return
         if subroutine.end_run_if_odd_cost:

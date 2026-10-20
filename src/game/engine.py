@@ -12,9 +12,11 @@ from content.cards.models import CardDefinition, InitiateRun
 
 from .card_movement import draw_from_deck, trash_installed_card
 from .card_play import play_card, validate_card_play
+from .choices import choice_options, resolve_choice
 from .commands import (
     AccessCard,
     AdvanceCard,
+    ChooseEffectOption,
     ChooseMulligan,
     ContinueRun,
     DiscardCards,
@@ -34,6 +36,7 @@ from .commands import (
     RunServer,
     ScoreAgenda,
     TrashPrograms,
+    TrashResource,
     UseCardAbility,
 )
 from .icebreakers import paid_actions, use_paid_ability
@@ -121,6 +124,8 @@ def legal_actions_for(
     if state.window is not None:
         if state.window.player is not player.role:
             return ()
+        if state.window.kind == "choice":
+            return tuple(ChooseEffectOption(o.option_id) for o in choice_options(state))
         if state.window.kind == "reaction":
             reactions = [r for r in state.window.reactions if r.player is player.role]
             actions = [ResolveReaction(r.card_instance_id, r.reaction_id) for r in reactions]
@@ -208,6 +213,11 @@ def legal_actions_for(
                     continue
                 actions.append(PlayCard(card.instance_id, server))
     if player.role is PlayerRole.CORP:
+        if state.runner.tags and player.credits >= 2:
+            actions.extend(TrashResource(c.instance_id) for c in state.card_instances.values()
+                           if c.installed and c.controller_id == state.runner.player_id
+                           and (definition := definitions.get(c.definition_id)) is not None
+                           and definition.card_type.value == "resource")
         for card in state.card_instances.values():
             try:
                 advanceable_card(state, player, card.instance_id, definitions)
@@ -248,6 +258,15 @@ def apply_command(
     player = _player_for_id(state, player_id)
     if player is None:
         raise IllegalCommand("Player is not part of this game")
+    if isinstance(command, ChooseEffectOption) or (state.window and state.window.kind == "choice"):
+        if (state.winner or not state.window or state.window.kind != "choice"
+                or state.window.player is not player.role or not isinstance(command, ChooseEffectOption)):
+            raise IllegalCommand("Resolve the pending effect choice first")
+        result = state.model_copy(deep=True)
+        resolve_choice(result, card_definitions or {}, command)
+        advance_run(result, card_definitions or {})
+        advance_turn(result, card_definitions)
+        return GameState.model_validate(result.model_dump())
     if state.memory_trash_pending:
         definitions = card_definitions or {}
         if not isinstance(command, TrashPrograms) or player.role is not PlayerRole.RUNNER or state.winner:
@@ -394,6 +413,17 @@ def apply_command(
         if not drew_all and player.role is PlayerRole.CORP:
             # CR 1.7.2c: the Corp loses when required to draw from an empty R&D.
             result.winner = PlayerRole.RUNNER
+    elif isinstance(command, TrashResource):
+        card = state.card_instances.get(command.card_instance_id)
+        definition = (card_definitions or {}).get(card.definition_id) if card else None
+        if (player.role is not PlayerRole.CORP or not state.runner.tags or player.credits < 2
+                or not card or not card.installed or card.controller_id != state.runner.player_id
+                or not definition or definition.card_type.value != "resource"):
+            raise IllegalCommand("Spend 2 credits to trash an installed resource while the Runner is tagged")
+        result = state.model_copy(deep=True)
+        result.corp.clicks_remaining -= 1
+        result.corp.credits -= 2
+        trash_installed_card(result, result.card_instances[command.card_instance_id])
     elif isinstance(command, RemoveTag):
         if player.role is not PlayerRole.RUNNER:
             raise IllegalCommand("Only the Runner can remove a tag")
@@ -469,6 +499,8 @@ def pending_decision(state: GameState, definitions=None) -> PendingDecision | No
         kind = {"movement": "continue_run", "subroutine_choice": "continue_run", "breach": "choose_access", "access": "resolve_access"}[state.run.phase]
         return PendingDecision(player=PlayerRole.RUNNER, type=kind)
     if state.window is not None:
+        if state.window.kind == "choice":
+            return PendingDecision(player=state.window.player, type="choose_effect")
         return PendingDecision(player=state.window.player, type=("paid_ability_window" if state.window.kind == "paid" else "resolve_reaction"))
     if state.turn is None:
         return None
