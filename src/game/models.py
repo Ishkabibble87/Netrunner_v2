@@ -317,6 +317,7 @@ class RunState(DomainModel):
 
     Remote cleanup is deferred until the run ends because remote IDs are display
     positions and may be renumbered when the accessed card leaves its server.
+    Delayed breaker reactions join the run-end batch before this context is freed.
     """
 
     run_id: UUID = Field(default_factory=uuid4)
@@ -329,6 +330,7 @@ class RunState(DomainModel):
     pending_step: Literal["breach", "access_choices", "finish_access", "cleanup"] | None = None
     server_id: ServerId
     phase: Literal["initiation", "approach", "encounter", "movement", "success", "breach", "access", "ended"] = "movement"
+    delayed_reactions: list[PendingReaction] = Field(default_factory=list)
     remaining_ice_ids: list[UUID] = Field(default_factory=list)
     current_ice_id: UUID | None = None
     broken_subroutine_indices: list[NonNegativeCounter] = Field(default_factory=list)

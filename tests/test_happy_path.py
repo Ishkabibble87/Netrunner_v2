@@ -37,6 +37,7 @@ from game.commands import (
     UseCardAbility,
 )
 from game.engine import legal_actions_for
+from game.icebreakers import effective_strength
 from game.models import (
     CardZone,
     DeckSelection,
@@ -280,9 +281,9 @@ class GameProgressTests(unittest.TestCase):
         titles = ["Hedge Fund", "Government Subsidy", "Offworld Office", "Regolith Mining License",
                   "Sure Gamble", "Creative Commission", "Telework Contract", "VRcation", "Cleaver", "Palisade", "Jailbreak", "Overclock", "Docklands Pass", "Red Team", "Pennyshaver"]
         codes = [next(code for code, card in self.cards.items() if card.title == title) for title in titles]
-        viruses = ["30009", "30004", "30007"]
-        codes += sorted(set(selection.card_counts) - set(codes) - set(viruses))
-        codes += viruses
+        final_cards = ["30009", "30004", "30007", "30032"]
+        codes += sorted(set(selection.card_counts) - set(codes) - set(final_cards))
+        codes += final_cards
         return [code for code in codes for _ in range(selection.card_counts.get(code, 0))]
 
     def install_advance_and_score(self, session):
@@ -869,6 +870,43 @@ class GameProgressTests(unittest.TestCase):
         self.assertEqual(session.state.runner.credits, before + 2 * count)
         self.assertFalse(session.state.card_instances[fermenter].installed)
         self.assertEqual(session.state.card_instances[fermenter].counters, {})
+
+        # Continue the same game with a breaker and its delayed run-end effect.
+        wanted = {"Mayfly"}
+        for _ in range(10):
+            settle()
+            mayfly = next((c.instance_id for c in self.cards_in_zone(
+                session.state, session.state.runner.player_id, CardZone.HAND).values()
+                if self.cards[c.definition_id].title == "Mayfly"), None)
+            if mayfly:
+                break
+            submit(runner, DrawCard())
+        self.assertIsNotNone(mayfly)
+        programs = tuple(c.instance_id for c in session.state.card_instances.values()
+                         if c.installed and c.controller_id == session.state.runner.player_id
+                         and self.cards[c.definition_id].card_type.value == "program")
+        submit(runner, InstallCard(mayfly, trash_card_instance_ids=programs))
+        settle()
+        while session.state.runner.credits < 5:
+            submit(runner, GainCredit())
+            settle()
+        submit(runner, RunServer(host.location.server.server_id))
+        for _ in range(20):
+            if session.state.run.phase == "encounter":
+                break
+            submit(session.state.window.player, PassPriority())
+        ice = session.state.card_instances[session.state.run.current_ice_id]
+        strength = effective_strength(session.state, ice, self.cards[ice.definition_id], self.cards)
+        for _ in range(max(0, strength - 1)):
+            submit(runner, UseCardAbility(mayfly, "boost_strength"))
+        submit(runner, UseCardAbility(mayfly, "break_subroutine", (0,)))
+        settle()
+        self.assertTrue(session.state.card_instances[mayfly].installed)
+        submit(runner, JackOut())
+        settle()
+        self.assertIsNone(session.state.run)
+        self.assertFalse(session.state.card_instances[mayfly].installed)
+        self.assertEqual(session.state.card_instances[mayfly].location.zone, CardZone.DISCARD_PILE)
 
     @staticmethod
     def cards_in_zone(state, player_id, zone):

@@ -7,6 +7,10 @@ from .models import CardZone, GameState, ZoneLocation
 
 def trash_installed_card(state, card, *, face_up=True):
     """Trash a source and its hosted descendants, clearing counters and locations."""
+    if state.run:
+        # Leaving play makes this installation an invalid delayed-trash target.
+        state.run.delayed_reactions = [r for r in state.run.delayed_reactions
+                                       if r.card_instance_id != card.instance_id]
     for hosted in tuple(state.card_instances.values()):
         if hosted.location.host_card_instance_id == card.instance_id:
             trash_installed_card(state, hosted)

@@ -52,6 +52,8 @@ def install_cost(state: GameState, player: PlayerState, definition: CardDefiniti
     if (definition.card_type is CardType.PROGRAM
             and not state.turn.occurrences.get(f"program_install:{player.role}", 0)):
         discount = sum(d.first_program_discount for d in modifier_sources(state, player, definitions))
+    if state.turn.occurrences.get("run_success:runner", 0):
+        discount += definition.successful_run_install_discount
     return max(0, definition.install_cost - discount)
 
 

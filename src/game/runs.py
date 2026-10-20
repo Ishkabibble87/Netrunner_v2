@@ -127,7 +127,10 @@ def end_run(state: GameState, definitions: Mapping[str, CardDefinition]) -> None
     run.phase = "ended"
     run.pending_step = "cleanup"
     if state.winner is None:
-        emit_fact(state, definitions, run_fact(state, "run_end"))
+        reactions = collect_fact(state, definitions, run_fact(state, "run_end"))
+        reactions.extend(run.delayed_reactions)
+        run.delayed_reactions = []
+        open_reactions(state, definitions, reactions)
     else:
         state.suspended_windows.clear()
         cleanup_run(state)

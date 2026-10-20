@@ -7,12 +7,13 @@ subroutines live on the encounter, not on permanent card instances.
 from collections.abc import Mapping
 from itertools import combinations
 
-from content.cards.models import CardDefinition, PaidAbility
+from content.cards.models import CardDefinition, PaidAbility, TrashSource
 
 from .commands import UseCardAbility
-from .models import CardInstance, GameState, PlayerRole, PlayerState
+from .models import CardInstance, GameState, PlayerRole, PlayerState, RuleFact
 from .modifiers import installed_icebreaker_count
 from .payments import runner_funds, spend_runner_credits
+from .reactions import make_reaction
 from .setup import IllegalCommand
 
 
@@ -38,6 +39,20 @@ def paid_ability_amount(state: GameState, card: CardInstance, ability: PaidAbili
     return ability.amount
 
 
+def paid_ability_cost(state: GameState, ability: PaidAbility) -> int:
+    """Use turn history for conditional credit costs, including displayed prices."""
+    discount = ability.successful_run_discount if state.turn and state.turn.occurrences.get("run_success:runner", 0) else 0
+    return max(0, ability.credit_cost - discount)
+
+
+def paid_ability_label(state: GameState, card: CardInstance, ability: PaidAbility,
+                       definitions: Mapping[str, CardDefinition]) -> str:
+    """Render authored placeholders from the same values used during resolution."""
+    cost = paid_ability_cost(state, ability)
+    return ability.label.replace("{cost}", f"{cost} credit" + ("s" if cost != 1 else "")).replace(
+        "+X", f"+{paid_ability_amount(state, card, ability, definitions)}")
+
+
 def validate_paid_ability(state: GameState, player: PlayerState, command: UseCardAbility,
                           definitions: Mapping[str, CardDefinition]) -> PaidAbility:
     """Require priority, a controlled active source, funds, and valid targets."""
@@ -52,7 +67,7 @@ def validate_paid_ability(state: GameState, player: PlayerState, command: UseCar
     if command.server_id is not None:
         raise IllegalCommand("Paid abilities do not choose a server")
     funds = runner_funds(state)
-    if funds < ability.credit_cost:
+    if funds < paid_ability_cost(state, ability):
         raise IllegalCommand("Not enough credits to use this ability")
     if card.counters.get("virus", 0) < ability.virus_cost:
         raise IllegalCommand("Not enough hosted virus counters")
@@ -73,7 +88,7 @@ def validate_paid_ability(state: GameState, player: PlayerState, command: UseCar
     if ability.type == "break_host_subroutine":
         if card.location.host_card_instance_id != ice.instance_id:
             raise IllegalCommand("This ability can only break subroutines on its host ice")
-    elif ("Icebreaker" not in definition.subtypes or ability.subtype not in ice_definition.subtypes
+    elif ("Icebreaker" not in definition.subtypes or (ability.subtype is not None and ability.subtype not in ice_definition.subtypes)
             or effective_strength(state, card, definition, definitions) < effective_strength(state, ice, ice_definition, definitions)):
         raise IllegalCommand("The icebreaker must match the ice subtype and strength")
     if (not targets or len(targets) > ability.amount or len(set(targets)) != len(targets)
@@ -114,12 +129,18 @@ def use_paid_ability(state: GameState, player: PlayerState, command: UseCardAbil
                      definitions: Mapping[str, CardDefinition]) -> None:
     """Pay from the run fund first; boosts outside an encounter expire at once."""
     ability = validate_paid_ability(state, player, command, definitions)
-    spend_runner_credits(state, ability.credit_cost)
+    spend_runner_credits(state, paid_ability_cost(state, ability))
     card = state.card_instances[command.card_instance_id]
     if ability.virus_cost:
         card.counters["virus"] -= ability.virus_cost
     if ability.type in {"break_subroutines", "break_host_subroutine"}:
         state.run.broken_subroutine_indices.extend(command.subroutine_indices)
+        if ability.trash_at_run_end:
+            # CR 9.6.13: the nested ability is created by breaking, not boosting.
+            reaction = make_reaction(state, card, "trash_at_run_end",
+                f"{definitions[card.definition_id].title}: trash at run end", (TrashSource(),),
+                RuleFact(type="run_end", player=player.role, run_id=state.run.run_id))
+            state.run.delayed_reactions.append(reaction)
     elif ability.type == "lower_ice_strength":
         boosts = state.run.strength_boosts
         ice_id = state.run.current_ice_id
