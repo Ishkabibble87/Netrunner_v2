@@ -1453,6 +1453,16 @@
           }
         ]
       }
+    ],
+    "paid_abilities": [
+      {
+        "ability_id": "bioroid_break",
+        "label": "Lose 1 click: Break 1 subroutine on this ice",
+        "type": "break_self_subroutine",
+        "click_cost": 1,
+        "credit_cost": 0,
+        "amount": 1
+      }
     ]
   },
   "30039": {
@@ -1482,6 +1492,102 @@
       },
       {
         "type": "end_run"
+      }
+    ],
+    "paid_abilities": [
+      {
+        "ability_id": "bioroid_break",
+        "label": "Lose 1 click: Break 1 subroutine on this ice",
+        "type": "break_self_subroutine",
+        "click_cost": 1,
+        "credit_cost": 0,
+        "amount": 1
+      }
+    ]
+  },
+  "30012": {
+    "play_instructions": [
+      {
+        "type": "initiate_run",
+        "ice_rez_cost_increase": 3
+      }
+    ]
+  },
+  "30074": {
+    "rez_instructions": [],
+    "subroutines": [
+      {
+        "type": "effects",
+        "label": "The Runner loses 3 credits",
+        "instructions": [
+          {
+            "type": "lose_credits",
+            "player": "runner",
+            "amount": 3
+          }
+        ]
+      },
+      {
+        "type": "effects",
+        "label": "If the Runner has 6 credits or less, end the run",
+        "instructions": [
+          {
+            "type": "end_run",
+            "runner_credits_at_most": 6
+          }
+        ]
+      }
+    ]
+  },
+  "30062": {
+    "rez_instructions": [],
+    "subroutines": [
+      {
+        "type": "effects",
+        "label": "Trash 1 installed program or end the run",
+        "instructions": [
+          {
+            "type": "choose_effect",
+            "player": "corp",
+            "options": [
+              {
+                "option_id": "trash_program",
+                "label": "Trash 1 installed program",
+                "required_selection": {
+                  "type": "select_cards",
+                  "player": "corp",
+                  "side": "runner",
+                  "zone": "installed",
+                  "card_types": [
+                    "program"
+                  ],
+                  "effect": "trash"
+                },
+                "instructions": [
+                  {
+                    "type": "select_cards",
+                    "player": "corp",
+                    "side": "runner",
+                    "zone": "installed",
+                    "card_types": [
+                      "program"
+                    ],
+                    "effect": "trash"
+                  }
+                ]
+              },
+              {
+                "option_id": "end_run",
+                "label": "End the run",
+                "instructions": [
+                  {
+                    "type": "end_run"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
       }
     ]
   }

@@ -369,6 +369,7 @@ class RunState(DomainModel):
     accessed_card_ids: list[UUID] = Field(default_factory=list)
     visible_card_ids: list[UUID] = Field(default_factory=list)
     cannot_steal_or_trash: bool = False
+    ice_rez_cost_increase: int = Field(default=0, ge=0)
     current_card_id: UUID | None = None
     bad_publicity_credits: int = Field(default=0, ge=0)
 

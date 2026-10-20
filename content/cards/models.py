@@ -97,6 +97,7 @@ class InitiateRun(CardContentModel):
     hosted_credits: int = Field(default=0, ge=0)
     unrun_this_turn: bool = False
     successful_take_credits: int = Field(default=0, ge=0)
+    ice_rez_cost_increase: int = Field(default=0, ge=0)
 
 
 class TrashSource(CardContentModel):
@@ -123,6 +124,15 @@ class GiveTags(CardContentModel):
 
 class EndRunEffect(CardContentModel):
     type: Literal["end_run"] = "end_run"
+    runner_credits_at_most: int | None = Field(default=None, ge=0)
+
+
+class LoseCredits(CardContentModel):
+    """Credit loss affects the named player's pool, never payment-only funds."""
+
+    type: Literal["lose_credits"] = "lose_credits"
+    player: Literal["corp", "runner"]
+    amount: int = Field(gt=0)
 
 
 class PreventStealTrash(CardContentModel):
@@ -165,6 +175,7 @@ class EffectOption(CardContentModel):
     credit_cost: int = Field(default=0, ge=0)
     click_cost: int = Field(default=0, ge=0)
     trash_hand_cost: int = Field(default=0, ge=0)
+    required_selection: SelectCards | None = None
     instructions: tuple["PlayInstruction", ...] = ()
 
 
@@ -184,7 +195,7 @@ class TaggedDamage(CardContentModel):
     amount: int = Field(gt=0)
 
 
-PlayInstruction = Annotated[SelectCards | TrashAccessed | GiveTags | ChooseEffect | PreventStealTrash | EndRunEffect | DealDamage | TaggedDamage | PlaceVirusCounters | DerezHost | GainCreditsPerVirus | GainCredits | GainAccessCredits | AdditionalAccesses | DrawCards | LoseClickIfAny | LoadCredits | TakeCredits | InitiateRun | TrashSource, Field(discriminator="type")]
+PlayInstruction = Annotated[SelectCards | TrashAccessed | GiveTags | ChooseEffect | PreventStealTrash | EndRunEffect | LoseCredits | DealDamage | TaggedDamage | PlaceVirusCounters | DerezHost | GainCreditsPerVirus | GainCredits | GainAccessCredits | AdditionalAccesses | DrawCards | LoseClickIfAny | LoadCredits | TakeCredits | InitiateRun | TrashSource, Field(discriminator="type")]
 
 
 class TriggeredAbility(CardContentModel):
@@ -215,11 +226,12 @@ class ActionAbility(CardContentModel):
 
 
 class PaidAbility(CardContentModel):
-    """Paid encounter effects with conditional costs, authored targets, and run-end effects."""
+    """Paid effects, breaker interfaces, and Runner click abilities on encountered ice."""
 
     ability_id: str = Field(min_length=1)
     label: str = Field(min_length=1)
-    type: Literal["boost_strength", "break_subroutines", "lower_ice_strength", "break_host_subroutine", "effects"]
+    type: Literal["boost_strength", "break_subroutines", "lower_ice_strength", "break_host_subroutine", "break_self_subroutine", "effects"]
+    click_cost: int = Field(default=0, ge=0)
     instructions: tuple[PlayInstruction, ...] = ()
     remove_source_cost: bool = False
     virus_cost: int = Field(default=0, ge=0)
@@ -237,7 +249,7 @@ class EndRun(CardContentModel):
 
 
 class EffectSubroutine(CardContentModel):
-    """Ordered immediate effects, with the two damage-ice follow-up behaviors."""
+    """Ordered effects that can suspend for choices, with damage-ice follow-ups."""
 
     type: Literal["effects"] = "effects"
     label: str

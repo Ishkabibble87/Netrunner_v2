@@ -68,7 +68,7 @@ from .models import (
     TurnPhase,
     ZoneLocation,
 )
-from .modifiers import memory_limit, memory_used
+from .modifiers import memory_limit, memory_used, rez_cost
 from .priority import pass_priority
 from .reactions import (
     basic_draw_amount,
@@ -134,7 +134,7 @@ def legal_actions_for(
         if state.window.kind == "target":
             return (card_selection(state, definitions),)
         if state.window.kind == "choice":
-            return tuple(ChooseEffectOption(o.option_id) for o in choice_options(state))
+            return tuple(ChooseEffectOption(o.option_id) for o in choice_options(state, definitions))
         if state.window.kind == "reaction":
             reactions = [r for r in state.window.reactions if r.player is player.role]
             actions = [ResolveReaction(r.card_instance_id, r.reaction_id) for r in reactions]
@@ -355,7 +355,7 @@ def apply_command(
             use_paid_ability(result, actor, command, definitions)
         elif isinstance(command, RezCard):
             card, definition = validate_rez(result, actor, command.card_instance_id, definitions)
-            actor.credits -= definition.rez_cost
+            actor.credits -= rez_cost(result, definition)
             result.card_instances[card.instance_id] = card.model_copy(update={"face_up": True, "rezzed": True})
             card = result.card_instances[card.instance_id]
             resolve_lifecycle(result, actor, card, definitions, trigger="rez")

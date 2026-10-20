@@ -71,6 +71,7 @@ def play_card(state: GameState, player: PlayerState, instance_id: UUID,
                 card.counters["credit"] = instruction.hosted_credits
             start_run(state, server_id, definitions, source_event_id=instance_id, source_ability_id="play",
                       successful_draw=instruction.successful_draw,
+                      ice_rez_cost_increase=instruction.ice_rez_cost_increase,
                       additional_accesses=instruction.additional_accesses)
             return
         resolve_effect(state, player, instruction, card, definitions=definitions)

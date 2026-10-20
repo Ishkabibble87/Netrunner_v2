@@ -177,7 +177,9 @@ class GameScreen:
                                  if c["instance_id"] == action["card_instance_id"] and c.get("card")), {})
                     title = card.get("title", "card")
                     if action_type == "rez_card":
-                        cost = self.card_catalog.get(card.get("definition_id"), {}).get("rez_cost", "?")
+                        cost = card.get("effective_rez_cost")
+                        if cost is None:
+                            cost = self.card_catalog.get(card.get("definition_id"), {}).get("rez_cost", "?")
                         label = f"Rez {title} · {cost} credits"
                     else:
                         ability = card.get("ability_labels", {}).get(action["ability_id"], action["ability_id"])

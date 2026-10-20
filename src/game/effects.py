@@ -17,6 +17,7 @@ from content.cards.models import (
     GiveTags,
     LoadCredits,
     LoseClickIfAny,
+    LoseCredits,
     PlaceVirusCounters,
     PlayInstruction,
     PreventStealTrash,
@@ -60,7 +61,11 @@ def resolve_effect(state: GameState, player: PlayerState, instruction: PlayInstr
         trash_accessed_card(state, definitions or {})
     elif isinstance(instruction, EndRunEffect):
         from .runs import end_run
-        end_run(state, definitions or {})
+        if instruction.runner_credits_at_most is None or state.runner.credits <= instruction.runner_credits_at_most:
+            end_run(state, definitions or {})
+    elif isinstance(instruction, LoseCredits):
+        target = state.corp if instruction.player == "corp" else state.runner
+        target.credits = max(0, target.credits - instruction.amount)
     elif isinstance(instruction, DealDamage):
         counters = set_aside_counters if set_aside_counters is not None else (source.counters if source else {})
         amount = instruction.amount
