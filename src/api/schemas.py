@@ -58,7 +58,7 @@ from game.models import (
     PlayerState,
     ServerId,
 )
-from game.modifiers import install_cost, memory_limit
+from game.modifiers import install_cost, memory_limit, rez_cost
 from game.payments import event_credits
 from game.turns import maximum_hand_size
 
@@ -395,6 +395,7 @@ class CardView(ApiModel):
     paid_ability_ids: list[str] = Field(default_factory=list)
     strength: int | None = None
     effective_install_cost: int | None = None
+    effective_rez_cost: int | None = None
 
 
 class InstalledCardView(ApiModel):
@@ -542,6 +543,7 @@ class InitialGameView(ApiModel):
                     for a in (*definition.action_abilities, *definition.paid_abilities)},
                 paid_ability_ids=[a.ability_id for a in definition.paid_abilities],
                 strength=effective_strength(state, instance, definition, card_definitions) if definition.strength is not None else None,
+                effective_rez_cost=rez_cost(state, definition),
                 effective_install_cost=(install_cost(state, state.runner, definition, card_definitions)
                     if state.turn and definition.side is CardSide.RUNNER and definition.install_cost is not None else None),
             )
@@ -602,7 +604,7 @@ class InitialGameView(ApiModel):
                 if state.window and state.window.kind == "target" and state.window.player is you.role else
                 [card_view(i) for i in state.window.install_card_ids]
                 if state.window and state.window.kind == "install" and state.window.player is you.role else [],
-            effect_options={o.option_id: o.label for o in choice_options(state)}
+            effect_options={o.option_id: o.label for o in choice_options(state, card_definitions)}
                 if state.window and state.window.kind == "choice" and state.window.player is you.role else {},
             run=RunView(
                 cannot_steal_or_trash=state.run.cannot_steal_or_trash,

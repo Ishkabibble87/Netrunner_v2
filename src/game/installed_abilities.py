@@ -24,6 +24,7 @@ from .models import (
     PlayerState,
     RuleFact,
 )
+from .modifiers import rez_cost
 from .reactions import emit_fact, resolve_sequence
 from .setup import IllegalCommand
 
@@ -55,7 +56,8 @@ def validate_rez(state: GameState, player: PlayerState, instance_id: UUID,
             state.run is None or state.run.phase != "approach"
             or state.run.current_ice_id != instance_id or definition.subroutines is None):
         raise IllegalCommand("Rez only the supported ice currently being approached")
-    if definition.rez_cost is None or player.credits < definition.rez_cost:
+    cost = rez_cost(state, definition)
+    if cost is None or player.credits < cost:
         raise IllegalCommand("Not enough credits to rez this card")
     return card, definition
 
@@ -107,6 +109,7 @@ def use_ability(state: GameState, player: PlayerState, command: UseCardAbility,
                   source_ability_id=ability.ability_id,
                   successful_take_credits=run.successful_take_credits,
                   successful_draw=run.successful_draw, additional_accesses=run.additional_accesses,
+                  ice_rez_cost_increase=run.ice_rez_cost_increase,
                   additional_accesses_per_virus=run.additional_accesses_per_virus)
     else:
         counters = None

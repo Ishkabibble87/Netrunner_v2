@@ -327,10 +327,12 @@ def begin_breach(state: GameState, definitions: Mapping[str, CardDefinition]) ->
 
 def start_run(state, server_id, definitions, *, source_event_id=None,
               successful_draw=0, additional_accesses=0, source_card_id=None,
-              source_ability_id=None, successful_take_credits=0, additional_accesses_per_virus=False):
+              source_ability_id=None, successful_take_credits=0, additional_accesses_per_virus=False,
+              ice_rez_cost_increase=0):
     """Enter the same run timing structure from a basic action or event."""
     source_card_id = source_card_id or source_event_id
     state.run = RunState(server_id=server_id, source_event_id=source_event_id,
+                         ice_rez_cost_increase=ice_rez_cost_increase,
                          source_card_id=source_card_id, source_ability_id=source_ability_id,
                          source_location=state.card_instances[source_card_id].location.model_copy(deep=True) if source_card_id else None,
                          successful_take_credits=successful_take_credits,
@@ -420,7 +422,7 @@ def resolve_subroutines(state, definitions):
             continue
         for instruction in subroutine.instructions:
             trashed.extend(resolve_effect(state, state.corp, instruction, ice, definitions=definitions) or ())
-            if state.winner is not None:
+            if state.winner is not None or state.run is None or state.run.phase != "encounter":
                 return
         if subroutine.end_run_if_odd_cost:
             for card in trashed:

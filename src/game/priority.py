@@ -14,9 +14,17 @@ def has_window_options(state: GameState, role: PlayerRole, definitions) -> bool:
     installed = [c for c in state.card_instances.values()
                  if c.installed and c.controller_id == player.player_id]
     if any(c.face_up and definitions.get(c.definition_id)
-           and definitions[c.definition_id].paid_abilities for c in installed):
+           and any(a.type != "break_self_subroutine" for a in definitions[c.definition_id].paid_abilities)
+           for c in installed):
         return True
     if role is PlayerRole.RUNNER:
+        run = state.run
+        ice = state.card_instances.get(run.current_ice_id) if run and run.phase == "encounter" else None
+        definition = definitions.get(ice.definition_id) if ice and ice.installed and ice.rezzed else None
+        if (definition and any(a.type == "break_self_subroutine" and player.clicks_remaining >= a.click_cost
+                               for a in definition.paid_abilities)
+                and any(i not in run.broken_subroutine_indices for i in range(len(definition.subroutines or ())))):
+            return True
         return False
     can_score = (state.run is None and state.turn.active_player is PlayerRole.CORP
                  and state.turn.phase in {TurnPhase.DRAW, TurnPhase.ACTION})

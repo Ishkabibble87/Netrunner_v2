@@ -114,7 +114,7 @@ class GameProgressTests(unittest.TestCase):
         selections[PlayerRole.CORP] = deck
         runner_deck = selections[PlayerRole.RUNNER]
         selections[PlayerRole.RUNNER] = runner_deck.model_copy(update={
-            "card_counts": {**runner_deck.card_counts, "30009": 1, "30004": 1, "30007": 1, "30002": 1}})
+            "card_counts": {**runner_deck.card_counts, "30009": 1, "30004": 1, "30007": 1, "30002": 1, "30012": 1}})
         opponent = opponent.model_copy(update={"deck_selections": selections})
         player_id = uuid4()
         game = create_ai_game(
@@ -289,7 +289,7 @@ class GameProgressTests(unittest.TestCase):
         by all three Offices. Remaining copies follow in definition-ID order.
         """
         titles = ["Hedge Fund", "Government Subsidy", "Offworld Office", "Regolith Mining License",
-                  "Sure Gamble", "Creative Commission", "Telework Contract", "VRcation", "Cleaver", "Palisade", "Jailbreak", "Overclock", "Docklands Pass", "Red Team", "Pennyshaver"]
+                  "Sure Gamble", "Creative Commission", "Telework Contract", "VRcation", "Cleaver", "Palisade", "Jailbreak", "Overclock", "Tread Lightly", "Docklands Pass", "Red Team", "Pennyshaver"]
         codes = [next(code for code, card in self.cards.items() if card.title == title) for title in titles]
         final_cards = ["30009", "30004", "30007", "30002", "30041", "30053", "30032"]
         codes += sorted(set(selection.card_counts) - set(codes) - set(final_cards))
@@ -681,6 +681,21 @@ class GameProgressTests(unittest.TestCase):
         self.assertIsNone(session.state.run)
         self.assertEqual(session.state.card_instances[overclock].location.zone, CardZone.DISCARD_PILE)
         self.assertEqual(session.state.card_instances[overclock].counters, {})
+
+        tread = acquire("Tread Lightly")
+        before = session.state.runner.credits
+        submit(runner, PlayCard(tread, target))
+        self.assertEqual(session.state.runner.credits, before - self.cards["30012"].play_cost)
+        self.assertEqual(session.state.run.ice_rez_cost_increase, 3)
+        while session.state.run.phase != "encounter":
+            submit(session.state.window.player, PassPriority())
+        submit(runner, UseCardAbility(breaker, "boost_strength"))
+        submit(runner, UseCardAbility(breaker, "break_barrier", (0,)))
+        pass_windows()
+        submit(runner, JackOut())
+        pass_windows()
+        self.assertIsNone(session.state.run)
+        self.assertEqual(session.state.card_instances[tread].location.zone, CardZone.DISCARD_PILE)
 
     def use_run_triggered_cards(self, session):
         """Install hardware and run with Red Team through a multiaccess breach."""

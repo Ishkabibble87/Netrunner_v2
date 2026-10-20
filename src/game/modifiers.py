@@ -11,6 +11,14 @@ from content.cards.models import CardDefinition, CardType
 from .models import CardZone, GameState, PlayerRole, PlayerState
 
 
+def rez_cost(state: GameState, definition: CardDefinition) -> int | None:
+    """Apply the current run's ice-only modifier, including newly installed ice."""
+    if definition.rez_cost is None:
+        return None
+    increase = state.run.ice_rez_cost_increase if state.run and definition.card_type is CardType.ICE else 0
+    return definition.rez_cost + increase
+
+
 def modifier_sources(state: GameState, player: PlayerState,
                      definitions: Mapping[str, CardDefinition]) -> Iterator[CardDefinition]:
     """Yield definitions whose static abilities currently affect this player."""

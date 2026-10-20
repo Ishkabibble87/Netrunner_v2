@@ -52,11 +52,14 @@ def can_pay_option(state, role, option):
             and hand_count >= option.trash_hand_cost)
 
 
-def choice_options(state: GameState):
+def choice_options(state: GameState, definitions):
+    """Offer payable branches whose required targets can be selected in full."""
     window = state.window
     options = tuple(option for option in window.choice.options
                     if option.option_id not in window.chosen_options
-                    and can_pay_option(state, window.player, option))
+                    and can_pay_option(state, window.player, option)
+                    and (option.required_selection is None
+                         or len(selection_candidates(state, option.required_selection, definitions)) >= option.required_selection.count))
     if window.chosen_options:
         options += (EffectOption(option_id="finish", label="Finish resolving modes"),)
     return options
@@ -159,7 +162,7 @@ def resolve_choice(state, definitions, command: ChooseEffectOption, *, payment_c
     """Resolve one mode or pay a complete cost, retaining the effect controller."""
     from .reactions import checkpoint, resolve_instructions, settle_reactions
 
-    option = next((o for o in choice_options(state) if o.option_id == command.option_id), None)
+    option = next((o for o in choice_options(state, definitions) if o.option_id == command.option_id), None)
     if option is None:
         raise IllegalCommand("Choose an available effect option")
     window = state.window

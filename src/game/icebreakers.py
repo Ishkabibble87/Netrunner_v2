@@ -59,6 +59,17 @@ def validate_paid_ability(state: GameState, player: PlayerState, command: UseCar
     card = state.card_instances.get(command.card_instance_id)
     definition = definitions.get(card.definition_id) if card else None
     ability = next((a for a in definition.paid_abilities if a.ability_id == command.ability_id), None) if definition else None
+    if ability and ability.type == "break_self_subroutine":
+        run = state.run
+        if (player.role is not PlayerRole.RUNNER or not card.installed or not card.rezzed
+                or not card.face_up or run is None or run.phase != "encounter"
+                or run.current_ice_id != card.instance_id or command.server_id is not None
+                or state.window is None or state.window.kind != "paid" or state.window.player is not player.role):
+            raise IllegalCommand("Only the Runner can use this ability on the encountered ice with priority")
+        if player.clicks_remaining < ability.click_cost or runner_funds(state) < paid_ability_cost(state, ability):
+            raise IllegalCommand("Not enough clicks or credits to use this ability")
+        validate_break_targets(state, command, definition, ability)
+        return ability
     if ability and ability.type == "effects":
         if (card is None or not card.installed or not card.face_up or not card.rezzed
                 or card.controller_id != player.player_id or command.subroutine_indices or command.server_id is not None
@@ -75,6 +86,8 @@ def validate_paid_ability(state: GameState, player: PlayerState, command: UseCar
     funds = runner_funds(state)
     if funds < paid_ability_cost(state, ability):
         raise IllegalCommand("Not enough credits to use this ability")
+    if player.clicks_remaining < ability.click_cost:
+        raise IllegalCommand("Not enough clicks to use this ability")
     if card.counters.get("virus", 0) < ability.virus_cost:
         raise IllegalCommand("Not enough hosted virus counters")
     targets = command.subroutine_indices
@@ -97,11 +110,17 @@ def validate_paid_ability(state: GameState, player: PlayerState, command: UseCar
     elif ("Icebreaker" not in definition.subtypes or (ability.subtype is not None and ability.subtype not in ice_definition.subtypes)
             or effective_strength(state, card, definition, definitions) < effective_strength(state, ice, ice_definition, definitions)):
         raise IllegalCommand("The icebreaker must match the ice subtype and strength")
+    validate_break_targets(state, command, ice_definition, ability)
+    return ability
+
+
+def validate_break_targets(state, command, ice_definition, ability):
+    """All break abilities share distinct, unbroken, encounter-local targets."""
+    targets = command.subroutine_indices
     if (not targets or len(targets) > ability.amount or len(set(targets)) != len(targets)
             or any(i < 0 or i >= len(ice_definition.subroutines or ())
-                   or i in run.broken_subroutine_indices for i in targets)):
+                   or i in state.run.broken_subroutine_indices for i in targets)):
         raise IllegalCommand("Choose distinct unbroken subroutines within the ability's limit")
-    return ability
 
 
 def paid_actions(state: GameState, player: PlayerState,
@@ -113,7 +132,7 @@ def paid_actions(state: GameState, player: PlayerState,
         definition = definitions.get(card.definition_id)
         for ability in definition.paid_abilities if definition else ():
             selections = [()]
-            if ability.type in {"break_subroutines", "break_host_subroutine"}:
+            if ability.type in {"break_subroutines", "break_host_subroutine", "break_self_subroutine"}:
                 if not run or run.phase != "encounter":
                     continue
                 ice_definition = definitions[state.card_instances[run.current_ice_id].definition_id]
@@ -151,10 +170,11 @@ def use_paid_ability(state: GameState, player: PlayerState, command: UseCardAbil
                              ability.ability_id, ability.label, cost_paid=True)
         return
     spend_runner_credits(state, paid_ability_cost(state, ability))
+    player.clicks_remaining -= ability.click_cost
     card = state.card_instances[command.card_instance_id]
     if ability.virus_cost:
         card.counters["virus"] -= ability.virus_cost
-    if ability.type in {"break_subroutines", "break_host_subroutine"}:
+    if ability.type in {"break_subroutines", "break_host_subroutine", "break_self_subroutine"}:
         state.run.broken_subroutine_indices.extend(command.subroutine_indices)
         if ability.trash_at_run_end:
             # CR 9.6.13: the nested ability is created by breaking, not boosting.
