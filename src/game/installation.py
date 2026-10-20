@@ -25,6 +25,7 @@ from .models import (
     ZoneLocation,
 )
 from .modifiers import install_cost, memory_limit
+from .payments import runner_funds, spend_runner_credits
 from .setup import IllegalCommand
 
 
@@ -42,14 +43,16 @@ def installed_agenda(state: GameState, player: PlayerState, instance_id: UUID,
 
 
 def validate_install(state: GameState, player: PlayerState, command: InstallCard,
-                     definitions: Mapping[str, CardDefinition]) -> tuple[CardDefinition, int]:
+                     definitions: Mapping[str, CardDefinition], *, effect=None) -> tuple[CardDefinition, int]:
     """Validate destination, optional trash choices, and installation costs."""
     card = state.card_instances.get(command.card_instance_id)
     definition = definitions.get(card.definition_id) if card else None
     if player.role is PlayerRole.RUNNER:
         if (card is None or definition is None or card.owner_id != player.player_id
-                or card.controller_id != player.player_id or card.location.zone is not CardZone.HAND
-                or card.location.player_id != player.player_id or definition.side is not CardSide.RUNNER
+                or (effect is None and card.controller_id != player.player_id)
+                or (effect is None and card.location.zone is not CardZone.HAND)
+                or (card.location.player_id != player.player_id and not (effect and card.location.zone is CardZone.SET_ASIDE))
+                or definition.side is not CardSide.RUNNER
                 or definition.card_type not in {CardType.RESOURCE, CardType.PROGRAM, CardType.HARDWARE} or definition.install_instructions is None):
             raise IllegalCommand("Choose a supported resource, program, or hardware from your hand")
         if command.server_id is not None:
@@ -71,12 +74,13 @@ def validate_install(state: GameState, player: PlayerState, command: InstallCard
             used = sum(definitions[c.definition_id].memory_cost or 0 for c in programs if c.instance_id not in trash_ids)
             if used + (definition.memory_cost or 0) > memory_limit(state, player, definitions):
                 raise IllegalCommand("Trash installed programs to make enough memory available")
-        if definition.install_cost is None or player.credits < install_cost(state, player, definition, definitions):
+        cost = 0 if effect and effect.ignore_costs else install_cost(state, player, definition, definitions)
+        if definition.install_cost is None or runner_funds(state) < cost:
             raise IllegalCommand("Not enough credits to install this card")
-        return definition, install_cost(state, player, definition, definitions)
+        return definition, cost
     if (player.role is not PlayerRole.CORP or card is None
-            or card.owner_id != player.player_id or card.controller_id != player.player_id
-            or card.location.zone is not CardZone.HAND or card.location.player_id != player.player_id
+            or card.owner_id != player.player_id or (effect is None and card.controller_id != player.player_id)
+            or (effect is None and card.location.zone is not CardZone.HAND) or card.location.player_id != player.player_id
             or definition is None or definition.side is not CardSide.CORP
             or definition.card_type not in {CardType.AGENDA, CardType.ASSET, CardType.UPGRADE, CardType.ICE}):
         raise IllegalCommand("Choose an installable Corp card from your hand")
@@ -101,23 +105,29 @@ def validate_install(state: GameState, player: PlayerState, command: InstallCard
         raise IllegalCommand("Trash the existing asset or agenda before installing its replacement")
     if "Region" in definition.subtypes and any("Region" in definitions[c.definition_id].subtypes for c in remaining):
         raise IllegalCommand("A server can contain only one region")
-    cost = len(remaining) if area is ServerArea.ICE else 0
+    cost = len(remaining) if area is ServerArea.ICE and not (effect and effect.ignore_costs) else 0
     if player.credits < cost:
         raise IllegalCommand(f"Installing this ice costs {cost} credits")
     return definition, cost
 
 
 def install_card(state: GameState, player: PlayerState, command: InstallCard,
-                 definitions: Mapping[str, CardDefinition]) -> None:
+                 definitions: Mapping[str, CardDefinition], *, effect=None, inward_source=None) -> None:
     """Install on a working copy, keeping a replacement's destination alive."""
-    definition, cost = validate_install(state, player, command, definitions)
+    definition, cost = validate_install(state, player, command, definitions, effect=effect)
+    anchor = (state.card_instances[inward_source].location.server.ice_distance_from_server
+              if inward_source is not None else None)
+    inward_ids = {c.instance_id for c in state.card_instances.values() if anchor is not None
+                  and c.installed and c.location.server and c.location.server.server_id == command.server_id
+                  and c.location.server.area is ServerArea.ICE
+                  and c.location.server.ice_distance_from_server < anchor}
     if player.role is PlayerRole.RUNNER:
         for instance_id in command.trash_card_instance_ids:
             trash_installed_card(state, state.card_instances[instance_id])
-        player.credits -= cost
-        player.clicks_remaining -= 1
+        spend_runner_credits(state, cost)
+        player.clicks_remaining -= int(effect is None)
         card = state.card_instances[command.card_instance_id].model_copy(update={
-            "installed": True, "installed_turn": state.turn.number, "rezzed": False, "face_up": True,
+            "installed": True, "controller_id": player.player_id, "installed_turn": state.turn.number, "rezzed": False, "face_up": True,
             "location": ZoneLocation(zone=CardZone.PLAY_AREA, host_card_instance_id=command.host_card_instance_id),
         })
         state.card_instances[card.instance_id] = card
@@ -149,11 +159,19 @@ def install_card(state: GameState, player: PlayerState, command: InstallCard,
     card = state.card_instances[command.card_instance_id]
     area = ServerArea.ICE if definition.card_type is CardType.ICE else ServerArea.ROOT
     state.card_instances[card.instance_id] = card.model_copy(update={
-        "installed": True, "installed_turn": state.turn.number, "rezzed": False, "face_up": False,
+        "installed": True, "controller_id": player.player_id, "installed_turn": state.turn.number, "rezzed": False, "face_up": False,
         "location": ZoneLocation(zone=CardZone.PLAY_AREA, server=ServerLocation(
             server_id=target, area=area, ice_distance_from_server=len(ice) if area is ServerArea.ICE else None))})
     player.credits -= cost
-    player.clicks_remaining -= 1
+    player.clicks_remaining -= int(effect is None)
+    if anchor is not None:
+        inward = sum(c.instance_id in inward_ids for c in ice)
+        ordered = [*ice[:inward], state.card_instances[card.instance_id], *ice[inward:]]
+        for distance, item in enumerate(ordered):
+            item.location.server.ice_distance_from_server = distance
+        if state.run and state.run.server_id == target:
+            state.run.remaining_ice_ids = [c.instance_id for c in reversed(ordered)
+                if c.instance_id in state.run.remaining_ice_ids or c.instance_id == card.instance_id]
 
     resolve_lifecycle(state, player, state.card_instances[card.instance_id],
                       definitions, trigger="install")

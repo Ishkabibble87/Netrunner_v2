@@ -36,6 +36,7 @@ from game.commands import (
     RezCard,
     RunServer,
     ScoreAgenda,
+    SelectEffectCards,
     UseCardAbility,
 )
 from game.engine import legal_actions_for
@@ -50,6 +51,7 @@ from game.models import (
 )
 from game.modifiers import memory_limit
 from game.setup import IllegalCommand
+from game.turns import hand_cards
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -80,6 +82,7 @@ class GameProgressTests(unittest.TestCase):
         self.use_turn_triggered_economy(session)
         self.use_hosted_viruses(session)
         self.take_and_remove_a_tag(session)
+        self.recycle_cards_with_sprint(session)
         self.suffer_damage_and_flatline(session)
 
     def select_and_parse_deck(self) -> DeckSelection:
@@ -101,8 +104,8 @@ class GameProgressTests(unittest.TestCase):
                 "Whitespace": 2, "Karunā": 2, "Tithe": 2,
             },
         )
-        # Add one real tag operation for the later continuation of this scenario.
-        return deck.model_copy(update={"card_counts": {**deck.card_counts, "30057": 1}})
+        # Add the later tag and recursion flow, with enough cards for Sprint's draw.
+        return deck.model_copy(update={"card_counts": {**deck.card_counts, "30057": 1, "30041": 1, "30053": 3}})
 
     def select_opponent_and_start_game(self, deck: DeckSelection) -> GameSession:
         opponent = load_opponent_profiles(self.cards)["system-gateway-training"]
@@ -288,7 +291,7 @@ class GameProgressTests(unittest.TestCase):
         titles = ["Hedge Fund", "Government Subsidy", "Offworld Office", "Regolith Mining License",
                   "Sure Gamble", "Creative Commission", "Telework Contract", "VRcation", "Cleaver", "Palisade", "Jailbreak", "Overclock", "Docklands Pass", "Red Team", "Pennyshaver"]
         codes = [next(code for code, card in self.cards.items() if card.title == title) for title in titles]
-        final_cards = ["30009", "30004", "30007", "30002", "30032"]
+        final_cards = ["30009", "30004", "30007", "30002", "30041", "30053", "30032"]
         codes += sorted(set(selection.card_counts) - set(codes) - set(final_cards))
         codes += final_cards
         return [code for code in codes for _ in range(selection.card_counts.get(code, 0))]
@@ -986,6 +989,44 @@ class GameProgressTests(unittest.TestCase):
         self.assertEqual(session.state.runner.tags, 0)
         self.assertEqual(session.state.runner.credits, before - 2)
 
+    def recycle_cards_with_sprint(self, session):
+        """Continue the same game through drawing and shuffling cards into R&D."""
+        def submit(role, command):
+            player = session.state.corp if role is PlayerRole.CORP else session.state.runner
+            self.sessions.submit(session.state.game_id, session.player_tokens[player.player_id], command,
+                                 card_definitions=self.cards)
+
+        for _ in range(100):
+            state = session.state
+            self.assertIsNone(state.winner)
+            if state.window:
+                actions = legal_actions_for(state, (state.corp if state.window.player is PlayerRole.CORP else state.runner).player_id, self.cards)
+                submit(state.window.player, actions[0] if state.window.kind == "reaction" else PassPriority())
+            elif state.turn.phase is TurnPhase.DISCARD:
+                player = state.corp if state.turn.active_player is PlayerRole.CORP else state.runner
+                selection, = legal_actions_for(state, player.player_id, self.cards)
+                choices = sorted(selection.eligible_card_instance_ids,
+                    key=lambda i: self.cards[state.card_instances[i].definition_id].title in {"Sprint", "Karunā"})
+                submit(player.role, DiscardCards(tuple(choices[:selection.required_count])))
+            elif state.turn.active_player is PlayerRole.RUNNER:
+                submit(PlayerRole.RUNNER, GainCredit())
+            else:
+                sprint = next((c for c in hand_cards(state, state.corp) if c.definition_id == "30041"), None)
+                if sprint is None:
+                    submit(PlayerRole.CORP, DrawCard())
+                    continue
+                before = len(hand_cards(state, state.corp))
+                submit(PlayerRole.CORP, PlayCard(sprint.instance_id))
+                self.assertEqual(session.state.window.kind, "target")
+                selection, = legal_actions_for(session.state, state.corp.player_id, self.cards)
+                eligible = sorted(selection.eligible_card_instance_ids,
+                    key=lambda i: self.cards[session.state.card_instances[i].definition_id].title == "Karunā")
+                submit(PlayerRole.CORP, SelectEffectCards(tuple(eligible[:2])))
+                self.assertEqual(len(hand_cards(session.state, session.state.corp)), before)
+                self.assertEqual(session.state.card_instances[sprint.instance_id].location.zone, CardZone.DISCARD_PILE)
+                return
+        self.fail("Sprint was not reached")
+
     def suffer_damage_and_flatline(self, session):
         """Continue the same game through Karuna's choice and a lethal second run."""
         def submit(role, command):
@@ -1010,7 +1051,9 @@ class GameProgressTests(unittest.TestCase):
                 if state.turn.phase is TurnPhase.DISCARD:
                     player = state.corp if state.turn.active_player is PlayerRole.CORP else state.runner
                     selection, = legal_actions_for(state, player.player_id, self.cards)
-                    submit(player.role, DiscardCards(selection.eligible_card_instance_ids[:selection.required_count]))
+                    choices = sorted(selection.eligible_card_instance_ids,
+                        key=lambda i: self.cards[state.card_instances[i].definition_id].title == "Karunā")
+                    submit(player.role, DiscardCards(tuple(choices[:selection.required_count])))
                 elif state.turn.active_player is role:
                     return
                 else:

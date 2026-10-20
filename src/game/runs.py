@@ -75,6 +75,7 @@ def candidates(state: GameState) -> tuple[AccessCard, ...]:
 
 def run_actions(state: GameState, definitions: Mapping[str, CardDefinition]):
     """Describe only the Runner's current run decision."""
+    run = state.run
     if state.run.phase in {"movement", "subroutine_choice"}:
         return (ContinueRun(), JackOut())
     if state.run.phase == "breach":
@@ -83,6 +84,7 @@ def run_actions(state: GameState, definitions: Mapping[str, CardDefinition]):
     definition = definitions.get(card.definition_id)
     choices = [FinishAccess()]
     if (definition and definition.trash_cost is not None
+            and not run.cannot_steal_or_trash
             and card.location.zone is not CardZone.DISCARD_PILE
             and runner_funds(state) >= definition.trash_cost):
         choices.append(FinishAccess(trash=True))
@@ -159,6 +161,8 @@ def advance_run(state: GameState, definitions: Mapping[str, CardDefinition]) -> 
             run_window(state, "resolve_subroutines", definitions, rez_allowed=False)
         elif step == "subroutines":
             resolve_subroutines(state, definitions)
+        elif step == "uninstalled_ice":
+            enter_movement(state, definitions)
         elif step == "finish_access":
             state.run.current_card_id = None
             state.run.phase = "breach"
@@ -217,12 +221,13 @@ def resolve_run_command(state: GameState, command, definitions: Mapping[str, Car
         if definition is None:
             raise IllegalCommand("Card definitions are required to resolve access")
         if command.trash:
-            if (definition.trash_cost is None or card.location.zone is CardZone.DISCARD_PILE):
+            if (run.cannot_steal_or_trash or definition.trash_cost is None or card.location.zone is CardZone.DISCARD_PILE):
                 raise IllegalCommand("This accessed card cannot be trashed for its trash cost")
             spend_runner_credits(state, definition.trash_cost)
             trash_accessed_card(state, definitions)
             return
-        if definition.card_type is CardType.AGENDA:
+        can_steal = definition.card_type is CardType.AGENDA and not run.cannot_steal_or_trash
+        if can_steal:
             was_deck = card.location.zone is CardZone.DECK
             run.agendas_stolen += 1
             state.card_instances[card.instance_id] = card.model_copy(update={
@@ -237,20 +242,20 @@ def resolve_run_command(state: GameState, command, definitions: Mapping[str, Car
                 end_run(state, definitions)
                 return
         run.pending_step = "finish_access"
-        if definition.card_type is CardType.AGENDA:
+        if can_steal:
             emit_fact(state, definitions, run_fact(state, "steal", card_instance_id=card.instance_id), auto_single=True)
 
 
 def reindex_corp_deck(state):
-    cards = sorted((c for c in state.card_instances.values() if c.location.zone is CardZone.DECK
-                    and c.owner_id == state.corp.player_id), key=lambda c: c.location.deck_position)
-    for position, card in enumerate(cards, 1):
-        card.location.deck_position = position
+    from .card_movement import reindex_deck
+    reindex_deck(state, state.corp.player_id)
 
 
 def trash_accessed_card(state, definitions):
     """Share basic/effect trashing, persistence and hosted-card cleanup (CR 7.1.5)."""
     run = state.run
+    if run.cannot_steal_or_trash:
+        raise IllegalCommand("The Runner cannot trash Corp cards for the remainder of this run")
     card = state.card_instances[run.current_card_id]
     if card.location.zone is CardZone.DISCARD_PILE:
         raise IllegalCommand("Cannot trash a card already in Archives")
@@ -405,11 +410,11 @@ def resolve_subroutines(state, definitions):
             end_run(state, definitions)
             return
         trashed = []
-        if any(isinstance(i, (GiveTags, ChooseEffect)) for i in subroutine.instructions):
+        if any(isinstance(i, (GiveTags, ChooseEffect)) or i.type == "select_cards" for i in subroutine.instructions):
             run.pending_step = "subroutines"
             resolve_instructions(state, definitions, state.corp, ice, subroutine.instructions,
                                  f"subroutine_{index}", subroutine.label)
-            if state.window is not None or state.run is None or state.run.phase == "ended":
+            if state.window is not None or state.run is None or state.run.phase != "encounter":
                 return
             run.pending_step = None
             continue

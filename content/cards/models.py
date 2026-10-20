@@ -125,16 +125,29 @@ class EndRunEffect(CardContentModel):
     type: Literal["end_run"] = "end_run"
 
 
+class PreventStealTrash(CardContentModel):
+    """Ansel's run-long restriction, scoped to the current run."""
+
+    type: Literal["prevent_steal_trash"] = "prevent_steal_trash"
+
+
 class SelectCards(CardContentModel):
     """Choose a set at resolution time; effect targets allow partial resolution."""
 
     type: Literal["select_cards"] = "select_cards"
     player: Literal["corp", "runner"]
-    zone: Literal["hand", "installed"]
+    zone: Literal["hand", "installed", "deck", "discard", "hand_or_discard", "set_aside"]
     side: Literal["corp", "runner", "any"]
     card_types: tuple[CardType, ...] = ()
     count: int = Field(default=1, gt=0)
-    effect: Literal["trash", "place_advancement"] = "trash"
+    effect: Literal["trash", "place_advancement", "to_hand", "shuffle", "search", "install"] = "trash"
+    subtypes: tuple[str, ...] = ()
+    exclude_types: tuple[CardType, ...] = ()
+    up_to: bool = False
+    any_number: bool = False
+    install_if_successful: bool = False
+    ignore_costs: bool = False
+    inward_from_source: bool = False
     amount: int = Field(default=2, gt=0)
     not_installed_this_turn: bool = False
     optional: bool = False
@@ -171,7 +184,7 @@ class TaggedDamage(CardContentModel):
     amount: int = Field(gt=0)
 
 
-PlayInstruction = Annotated[SelectCards | TrashAccessed | GiveTags | ChooseEffect | EndRunEffect | DealDamage | TaggedDamage | PlaceVirusCounters | DerezHost | GainCreditsPerVirus | GainCredits | GainAccessCredits | AdditionalAccesses | DrawCards | LoseClickIfAny | LoadCredits | TakeCredits | InitiateRun | TrashSource, Field(discriminator="type")]
+PlayInstruction = Annotated[SelectCards | TrashAccessed | GiveTags | ChooseEffect | PreventStealTrash | EndRunEffect | DealDamage | TaggedDamage | PlaceVirusCounters | DerezHost | GainCreditsPerVirus | GainCredits | GainAccessCredits | AdditionalAccesses | DrawCards | LoseClickIfAny | LoadCredits | TakeCredits | InitiateRun | TrashSource, Field(discriminator="type")]
 
 
 class TriggeredAbility(CardContentModel):
@@ -181,7 +194,7 @@ class TriggeredAbility(CardContentModel):
     label: str = Field(min_length=1)
     trigger: Literal["turn_begin", "turn_end", "discard_end", "action", "advance", "install", "rez", "score", "steal", "encounter", "approach_server", "take_tags", "empty", "run_success", "breach", "access_trash", "run_end", "access", "mid_access"]
     scope: Literal["controller", "self", "any"] = "controller"
-    condition: Literal["previously_unadvanced", "facedown_archives", "installed_virus", "successful_run", "run_on_source_server", "agenda_stolen_here", "accessed_outside_archives"] | None = None
+    condition: Literal["previously_unadvanced", "facedown_archives", "installed_virus", "successful_run", "run_on_source_server", "agenda_stolen_here", "accessed_outside_archives", "scored_from_source_server"] | None = None
     persistent: bool = False
     servers: tuple[Literal["hq", "rd", "archives"], ...] | None = None
     optional: bool = False
@@ -206,7 +219,9 @@ class PaidAbility(CardContentModel):
 
     ability_id: str = Field(min_length=1)
     label: str = Field(min_length=1)
-    type: Literal["boost_strength", "break_subroutines", "lower_ice_strength", "break_host_subroutine"]
+    type: Literal["boost_strength", "break_subroutines", "lower_ice_strength", "break_host_subroutine", "effects"]
+    instructions: tuple[PlayInstruction, ...] = ()
+    remove_source_cost: bool = False
     virus_cost: int = Field(default=0, ge=0)
     successful_run_discount: int = Field(default=0, ge=0)
     trash_at_run_end: bool = False

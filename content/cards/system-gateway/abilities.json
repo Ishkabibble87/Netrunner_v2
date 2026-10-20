@@ -249,7 +249,49 @@
   },
   "30023": {
     "install_instructions": [],
-    "memory_bonus": 1
+    "memory_bonus": 1,
+    "triggered_abilities": [
+      {
+        "ability_id": "agenda_score",
+        "label": "Gain 1 credit, then optionally install from grip",
+        "trigger": "score",
+        "instructions": [
+          {
+            "type": "gain_credits",
+            "amount": 1
+          },
+          {
+            "type": "select_cards",
+            "player": "runner",
+            "side": "runner",
+            "zone": "hand",
+            "effect": "install",
+            "optional": true
+          }
+        ],
+        "scope": "any"
+      },
+      {
+        "ability_id": "agenda_steal",
+        "label": "Gain 1 credit, then optionally install from grip",
+        "trigger": "steal",
+        "instructions": [
+          {
+            "type": "gain_credits",
+            "amount": 1
+          },
+          {
+            "type": "select_cards",
+            "player": "runner",
+            "side": "runner",
+            "zone": "hand",
+            "effect": "install",
+            "optional": true
+          }
+        ],
+        "scope": "any"
+      }
+    ]
   },
   "30031": {
     "install_instructions": [],
@@ -257,7 +299,25 @@
     "hand_size_bonus": 1
   },
   "30035": {
-    "hand_size_bonus": 1
+    "hand_size_bonus": 1,
+    "triggered_abilities": [
+      {
+        "ability_id": "recur",
+        "label": "Add 1 card from Archives to HQ",
+        "trigger": "score",
+        "instructions": [
+          {
+            "type": "select_cards",
+            "player": "corp",
+            "side": "corp",
+            "zone": "discard",
+            "effect": "to_hand",
+            "optional": true
+          }
+        ],
+        "optional": true
+      }
+    ]
   },
   "30070": {
     "score_instructions": [],
@@ -1244,6 +1304,184 @@
           "resource"
         ],
         "optional": true
+      }
+    ]
+  },
+  "30011": {
+    "play_instructions": [
+      {
+        "type": "select_cards",
+        "player": "runner",
+        "side": "runner",
+        "zone": "deck",
+        "effect": "search",
+        "subtypes": [
+          "Icebreaker"
+        ],
+        "optional": true,
+        "install_if_successful": true
+      }
+    ]
+  },
+  "30041": {
+    "play_instructions": [
+      {
+        "type": "draw_cards",
+        "amount": 3
+      },
+      {
+        "type": "select_cards",
+        "player": "corp",
+        "side": "corp",
+        "zone": "hand",
+        "effect": "shuffle",
+        "count": 2
+      }
+    ]
+  },
+  "30044": {
+    "score_instructions": [
+      {
+        "type": "select_cards",
+        "player": "corp",
+        "side": "corp",
+        "zone": "hand",
+        "effect": "trash",
+        "any_number": true
+      },
+      {
+        "type": "select_cards",
+        "player": "corp",
+        "side": "corp",
+        "zone": "discard",
+        "effect": "shuffle",
+        "count": 3,
+        "up_to": true
+      }
+    ]
+  },
+  "30066": {
+    "rez_instructions": [],
+    "triggered_abilities": [
+      {
+        "ability_id": "search",
+        "label": "Search R&D for a non-agenda",
+        "trigger": "score",
+        "instructions": [
+          {
+            "type": "select_cards",
+            "player": "corp",
+            "side": "corp",
+            "zone": "deck",
+            "effect": "search",
+            "exclude_types": [
+              "agenda"
+            ],
+            "optional": true
+          }
+        ],
+        "optional": true,
+        "condition": "scored_from_source_server"
+      }
+    ]
+  },
+  "30053": {
+    "rez_instructions": [
+      {
+        "type": "draw_cards",
+        "amount": 2
+      }
+    ],
+    "paid_abilities": [
+      {
+        "ability_id": "recycle",
+        "label": "Remove from game: shuffle up to 2 cards from Archives into R&D",
+        "type": "effects",
+        "credit_cost": 0,
+        "amount": 1,
+        "remove_source_cost": true,
+        "instructions": [
+          {
+            "type": "select_cards",
+            "player": "corp",
+            "side": "corp",
+            "zone": "discard",
+            "effect": "shuffle",
+            "count": 2,
+            "up_to": true
+          }
+        ]
+      }
+    ]
+  },
+  "30038": {
+    "rez_instructions": [],
+    "subroutines": [
+      {
+        "type": "effects",
+        "label": "Trash 1 installed Runner card",
+        "instructions": [
+          {
+            "type": "select_cards",
+            "player": "corp",
+            "side": "runner",
+            "zone": "installed",
+            "effect": "trash"
+          }
+        ]
+      },
+      {
+        "type": "effects",
+        "label": "You may install 1 card from HQ or Archives",
+        "instructions": [
+          {
+            "type": "select_cards",
+            "player": "corp",
+            "side": "corp",
+            "zone": "hand_or_discard",
+            "effect": "install",
+            "optional": true
+          }
+        ]
+      },
+      {
+        "type": "effects",
+        "label": "The Runner cannot steal or trash Corp cards for the remainder of this run",
+        "instructions": [
+          {
+            "type": "prevent_steal_trash"
+          }
+        ]
+      }
+    ]
+  },
+  "30039": {
+    "rez_instructions": [],
+    "subroutines": [
+      {
+        "type": "effects",
+        "label": "Install ice from HQ or Archives directly inward, ignoring all costs",
+        "instructions": [
+          {
+            "type": "select_cards",
+            "player": "corp",
+            "side": "corp",
+            "zone": "hand_or_discard",
+            "effect": "install",
+            "card_types": [
+              "ice"
+            ],
+            "optional": true,
+            "ignore_costs": true,
+            "inward_from_source": true
+          }
+        ]
+      },
+      {
+        "type": "end_run"
+      },
+      {
+        "type": "end_run"
       }
     ]
   }

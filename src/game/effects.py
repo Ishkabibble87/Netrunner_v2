@@ -19,6 +19,7 @@ from content.cards.models import (
     LoseClickIfAny,
     PlaceVirusCounters,
     PlayInstruction,
+    PreventStealTrash,
     SelectCards,
     TaggedDamage,
     TakeCredits,
@@ -42,7 +43,10 @@ def resolve_effect(state: GameState, player: PlayerState, instruction: PlayInstr
                    *, set_aside_counters: dict[str, int] | None = None,
                    definitions=None) -> tuple[CardInstance, ...] | None:
     """Resolve one instruction or suspend its parent until its decision finishes."""
-    if isinstance(instruction, GiveTags):
+    if isinstance(instruction, PreventStealTrash):
+        if state.run:
+            state.run.cannot_steal_or_trash = True
+    elif isinstance(instruction, GiveTags):
         from .tags import give_tags
         give_tags(state, instruction.amount, definitions or {})
     elif isinstance(instruction, ChooseEffect):

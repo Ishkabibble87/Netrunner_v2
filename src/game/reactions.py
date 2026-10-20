@@ -114,6 +114,9 @@ def collect_fact(state: GameState, definitions: Mapping[str, CardDefinition], fa
                     continue
             if ability.condition == "previously_unadvanced" and fact.previous_advancement != 0:
                 continue
+            if ability.condition == "scored_from_source_server" and (
+                    not card.location.server or card.location.server.server_id != fact.server_id):
+                continue
             if ability.servers is not None and fact.server_id not in ability.servers:
                 continue
             if ability.first_each_turn and occurrence != 1:

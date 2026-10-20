@@ -131,7 +131,7 @@ class HardwareModifierTests(ReactionScenario):
         before = len(hand_cards(self.state, self.state.corp))
         view = self.submit(PlayerRole.CORP, {"type": "score_agenda", "card_instance_id": str(hub)})
         self.assertEqual(view["you"]["maximum_hand_size"], 8)
-        reaction, = self.reactions(PlayerRole.CORP)
+        reaction = next(a for a in self.reactions(PlayerRole.CORP) if a["card_instance_id"] == str(hub))
         self.submit(PlayerRole.CORP, dict(reaction, decline=True))
         self.assertEqual(len(hand_cards(self.state, self.state.corp)), before)
         second = self.add_card("30070", PlayerRole.CORP)
@@ -139,7 +139,7 @@ class HardwareModifierTests(ReactionScenario):
         self.state.window = PriorityWindow(kind="paid", player=PlayerRole.CORP)
         self.submit(PlayerRole.CORP, {"type": "score_agenda", "card_instance_id": str(second)})
         self.assertEqual(self.view(PlayerRole.CORP)["you"]["maximum_hand_size"], 10)
-        self.submit(PlayerRole.CORP, self.reactions(PlayerRole.CORP)[0])
+        self.submit(PlayerRole.CORP, next(a for a in self.reactions(PlayerRole.CORP) if a["card_instance_id"] == str(second)))
         self.assertEqual(len(hand_cards(self.state, self.state.corp)), before + 2)
         # An agenda stolen into the Runner's score area supplies no hand bonus.
         self.state.card_instances[hub].location = ZoneLocation(zone=CardZone.SCORE_AREA, player_id=self.state.runner.player_id)

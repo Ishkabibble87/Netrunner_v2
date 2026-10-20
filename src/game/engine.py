@@ -73,7 +73,9 @@ from .priority import pass_priority
 from .reactions import (
     basic_draw_amount,
     checkpoint,
+    collect_fact,
     emit_fact,
+    open_reactions,
     pass_reactions,
     resolve_reaction,
     settle_reactions,
@@ -126,6 +128,9 @@ def legal_actions_for(
     if state.window is not None:
         if state.window.player is not player.role:
             return ()
+        if state.window.kind == "install":
+            from .effect_installation import install_actions
+            return install_actions(state, definitions)
         if state.window.kind == "target":
             return (card_selection(state, definitions),)
         if state.window.kind == "choice":
@@ -256,6 +261,17 @@ def apply_command(
     card_definitions: Mapping[str, CardDefinition] | None = None,
 ) -> GameState:
     """Validate and apply one command, returning a new validated snapshot."""
+    if state.window and state.window.kind == "install":
+        from .effect_installation import resolve_install
+        actor = _player_for_id(state, player_id)
+        if state.winner or actor is None or actor.role is not state.window.player:
+            raise IllegalCommand("You do not control the pending installation")
+        result = state.model_copy(deep=True)
+        result.revealed_card_ids = []
+        resolve_install(result, card_definitions or {}, command)
+        advance_run(result, card_definitions or {})
+        advance_turn(result, card_definitions)
+        return GameState.model_validate(result.model_dump())
     if isinstance(command, ChooseMulligan):
         return choose_mulligan(state, player_id, command)
 
@@ -268,6 +284,7 @@ def apply_command(
                 or not isinstance(command, SelectEffectCards if state.window.kind == "target" else ChooseEffectOption)):
             raise IllegalCommand("Resolve the pending effect choice first")
         result = state.model_copy(deep=True)
+        result.revealed_card_ids = []
         if isinstance(command, SelectEffectCards):
             resolve_selection(result, card_definitions or {}, command)
         else:
@@ -286,6 +303,7 @@ def apply_command(
                     for i in selected) > memory_limit(state, player, definitions)):
             raise IllegalCommand("Choose distinct installed programs that free enough memory")
         result = state.model_copy(deep=True)
+        result.revealed_card_ids = []
         for instance_id in command.card_instance_ids:
             trash_installed_card(result, result.card_instances[instance_id])
         checkpoint(result, definitions)
@@ -307,6 +325,7 @@ def apply_command(
         elif state.run is None or not isinstance(command, run_commands):
             raise IllegalCommand("Finish the current run before taking another action")
         result = state.model_copy(deep=True)
+        result.revealed_card_ids = []
         resolve_run_command(result, command, card_definitions or {})
         if isinstance(command, RunServer) and result.winner is None:
             result.pending_action_fact = RuleFact(type="action", player=player.role, action="run")
@@ -318,6 +337,7 @@ def apply_command(
         if state.winner is not None or state.window is None or state.window.player is not player.role:
             raise IllegalCommand("You do not have priority in a window")
         result = state.model_copy(deep=True)
+        result.revealed_card_ids = []
         actor = _player_for_role(result, player.role)
         definitions = card_definitions or {}
         if not isinstance(command, PassPriority) and result.window.kind == "paid":
@@ -346,18 +366,20 @@ def apply_command(
             card, definition = installed_agenda(result, actor, command.card_instance_id, definitions)
             if card.counters.get("advancement", 0) < definition.advancement_requirement:
                 raise IllegalCommand("The agenda has not met its advancement requirement")
+            scoring_server = card.location.server.server_id
             result.card_instances[card.instance_id] = card.model_copy(update={
                 "installed": False, "rezzed": False, "face_up": True, "counters": {}, "loaded_counter_types": set(),
                 "location": ZoneLocation(zone=CardZone.SCORE_AREA, player_id=actor.player_id)})
             result.turn.printed_agenda_points_scored += definition.agenda_points or 0
+            scoring_reactions = collect_fact(result, definitions, RuleFact(type="score", player=player.role,
+                card_instance_id=card.instance_id, server_id=scoring_server)) if agenda_points(result, actor, definitions) < 7 else []
             remove_empty_remotes(result)
             # CR 1.17.2: the victory checkpoint precedes scoring reactions.
             if agenda_points(result, actor, definitions) >= 7:
                 result.winner = player.role
                 result.window = None
             else:
-                emit_fact(result, definitions, RuleFact(type="score", player=player.role,
-                                                       card_instance_id=card.instance_id))
+                open_reactions(result, definitions, scoring_reactions)
         else:
             if result.window.kind != "reaction":
                 raise IllegalCommand("Choose a pending reaction")
@@ -377,6 +399,7 @@ def apply_command(
                 or len(set(selected)) != required or not set(selected) <= eligible):
             raise IllegalCommand(f"Choose exactly {required} distinct cards from your hand")
         result = state.model_copy(deep=True)
+        result.revealed_card_ids = []
         for instance_id in selected:
             card = result.card_instances[instance_id]
             card.face_up = player.role is PlayerRole.RUNNER
@@ -387,13 +410,16 @@ def apply_command(
 
     if isinstance(command, UseCardAbility):
         result = state.model_copy(deep=True)
+        result.revealed_card_ids = []
         use_ability(result, _player_for_role(result, player.role), command, card_definitions or {})
         remove_empty_remotes(result)
     elif isinstance(command, InstallCard):
         result = state.model_copy(deep=True)
+        result.revealed_card_ids = []
         install_card(result, _player_for_role(result, player.role), command, card_definitions or {})
     elif isinstance(command, AdvanceCard):
         result = state.model_copy(deep=True)
+        result.revealed_card_ids = []
         actor = _player_for_role(result, player.role)
         card, _ = advanceable_card(result, actor, command.card_instance_id, card_definitions or {})
         if actor.credits < 1:
@@ -406,14 +432,17 @@ def apply_command(
                   card_instance_id=card.instance_id, previous_advancement=previous))
     elif isinstance(command, PlayCard):
         result = state.model_copy(deep=True)
+        result.revealed_card_ids = []
         play_card(result, _player_for_role(result, player.role), command.card_instance_id,
                   card_definitions if card_definitions is not None else {}, command.server_id)
     elif isinstance(command, GainCredit):
         result = state.model_copy(deep=True)
+        result.revealed_card_ids = []
         _player_for_role(result, player.role).clicks_remaining -= 1
         _player_for_role(result, player.role).credits += 1
     elif isinstance(command, DrawCard):
         result = state.model_copy(deep=True)
+        result.revealed_card_ids = []
         active_player = _player_for_role(result, player.role)
         active_player.clicks_remaining -= 1
         amount = basic_draw_amount(result, active_player, card_definitions or {})
@@ -429,6 +458,7 @@ def apply_command(
                 or not definition or definition.card_type.value != "resource"):
             raise IllegalCommand("Spend 2 credits to trash an installed resource while the Runner is tagged")
         result = state.model_copy(deep=True)
+        result.revealed_card_ids = []
         result.corp.clicks_remaining -= 1
         result.corp.credits -= 2
         trash_installed_card(result, result.card_instances[command.card_instance_id])
@@ -440,6 +470,7 @@ def apply_command(
         if player.credits < 2:
             raise IllegalCommand("Removing a tag costs 2 credits")
         result = state.model_copy(deep=True)
+        result.revealed_card_ids = []
         result.runner.clicks_remaining -= 1
         result.runner.credits -= 2
         result.runner.tags -= 1
@@ -449,6 +480,7 @@ def apply_command(
         if player.clicks_remaining < 3:
             raise IllegalCommand("Purging virus counters costs 3 clicks")
         result = state.model_copy(deep=True)
+        result.revealed_card_ids = []
         result.corp.clicks_remaining -= 3
         # The registry includes hosted cards, so one pass purges counters everywhere.
         for card in result.card_instances.values():
@@ -507,7 +539,7 @@ def pending_decision(state: GameState, definitions=None) -> PendingDecision | No
         kind = {"movement": "continue_run", "subroutine_choice": "continue_run", "breach": "choose_access", "access": "resolve_access"}[state.run.phase]
         return PendingDecision(player=PlayerRole.RUNNER, type=kind)
     if state.window is not None:
-        if state.window.kind == "target":
+        if state.window.kind in {"target", "install"}:
             return PendingDecision(player=state.window.player, type="choose_cards")
         if state.window.kind == "choice":
             return PendingDecision(player=state.window.player, type="choose_effect")

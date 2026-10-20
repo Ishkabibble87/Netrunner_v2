@@ -314,7 +314,7 @@ class PriorityWindow(DomainModel):
     stack, including the next instruction of the resolving parent ability.
     """
 
-    kind: Literal["paid", "reaction", "choice", "target"]
+    kind: Literal["paid", "reaction", "choice", "target", "install"]
     choice: ChooseEffect | None = None
     choice_source_id: UUID | None = None
     choice_fact: RuleFact | None = None
@@ -323,6 +323,8 @@ class PriorityWindow(DomainModel):
     choice_remaining: int = 1
     chosen_options: list[str] = Field(default_factory=list)
     selection: SelectCards | None = None
+    install_card_ids: list[UUID] = Field(default_factory=list)
+    install_fallback_hand: bool = False
     payment_option: EffectOption | None = None
     player: PlayerRole
     reactions: list[PendingReaction] = Field(default_factory=list)
@@ -347,7 +349,7 @@ class RunState(DomainModel):
     successful_take_credits: int = Field(default=0, ge=0)
     access_count: int = Field(default=0, ge=0)
     agendas_stolen: int = Field(default=0, ge=0)
-    pending_step: Literal["success", "mid_access", "breach", "access_choices", "finish_access", "encounter_window", "subroutines", "cleanup"] | None = None
+    pending_step: Literal["success", "mid_access", "breach", "access_choices", "finish_access", "encounter_window", "subroutines", "uninstalled_ice", "cleanup"] | None = None
     server_id: ServerId
     phase: Literal["initiation", "approach", "encounter", "movement", "success", "breach", "access", "subroutine_choice", "ended"] = "movement"
     delayed_reactions: list[PendingReaction] = Field(default_factory=list)
@@ -366,6 +368,7 @@ class RunState(DomainModel):
     central_accesses: int = Field(default=0, ge=0)
     accessed_card_ids: list[UUID] = Field(default_factory=list)
     visible_card_ids: list[UUID] = Field(default_factory=list)
+    cannot_steal_or_trash: bool = False
     current_card_id: UUID | None = None
     bad_publicity_credits: int = Field(default=0, ge=0)
 
@@ -385,6 +388,7 @@ class GameState(DomainModel):
     memory_trash_pending: bool = False
     run: RunState | None = None
     runner_last_turn_successful: bool = False
+    revealed_card_ids: list[UUID] = Field(default_factory=list)
     servers: list[ServerId] = Field(default_factory=lambda: list(CentralServer))
     card_instances: dict[UUID, CardInstance] = Field(default_factory=dict)
 
