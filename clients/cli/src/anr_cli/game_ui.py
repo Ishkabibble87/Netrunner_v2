@@ -120,7 +120,7 @@ class GameScreen:
                     if action_type == "run_server":
                         label = f"Run {self._server_label(action['server_id'])} · 1 click"
                     elif action_type == "continue_run":
-                        label = "Continue inward"
+                        label = "Continue resolving subroutines" if run.get("phase") == "subroutine_choice" else "Continue inward"
                     elif action_type == "jack_out":
                         label = "Jack out"
                     elif action_type == "access_card":
@@ -367,7 +367,8 @@ class GameScreen:
 
         run = self.state.get("run")
         if run:
-            line(f"Run on {self._server_label(run['server_id'])} · {run['phase']}", "class:section")
+            phase = "Runner may jack out" if run["phase"] == "subroutine_choice" else run["phase"]
+            line(f"Run on {self._server_label(run['server_id'])} · {phase}", "class:section")
             line(f"Run credits: {run.get('bad_publicity_credits', 0)} bad publicity · {run.get('event_credits', 0)} event")
             line(f"Accesses: {run.get('access_count', 0)} · agendas stolen: {run.get('agendas_stolen', 0)}")
             if run.get("source_card") and not run.get("source_event"):
@@ -622,6 +623,8 @@ class GameScreen:
             if pending == self.viewer_role:
                 return "Choose your opening hand · one mulligan allowed"
             return f"Waiting for {str(pending).title()} opening-hand choice"
+        if (self.state.get("run") or {}).get("phase") == "subroutine_choice":
+            return "Jack out or continue resolving subroutines" if self.viewer_role == "runner" else "Runner may jack out"
         decision = self.state.get("decision") or {}
         if decision.get("type") in {"paid_ability_window", "resolve_reaction"}:
             who = "You" if decision["player"] == self.viewer_role else str(decision["player"]).title()

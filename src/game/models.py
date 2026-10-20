@@ -247,6 +247,7 @@ class TurnState(DomainModel):
     step: Literal["start", "turn_begin", "mandatory_draw", "before_action", "action", "discard", "end", "next_turn"] = "action"
     occurrences: dict[str, int] = Field(default_factory=dict)
     servers_run: set[ServerId] = Field(default_factory=set)
+    printed_agenda_points_scored: int = Field(default=0, ge=0)
 
     @model_validator(mode="after")
     def runner_has_no_draw_phase(self) -> "TurnState":
@@ -329,8 +330,9 @@ class RunState(DomainModel):
     agendas_stolen: int = Field(default=0, ge=0)
     pending_step: Literal["breach", "access_choices", "finish_access", "cleanup"] | None = None
     server_id: ServerId
-    phase: Literal["initiation", "approach", "encounter", "movement", "success", "breach", "access", "ended"] = "movement"
+    phase: Literal["initiation", "approach", "encounter", "movement", "success", "breach", "access", "subroutine_choice", "ended"] = "movement"
     delayed_reactions: list[PendingReaction] = Field(default_factory=list)
+    next_subroutine: int = Field(default=0, ge=0)
     remaining_ice_ids: list[UUID] = Field(default_factory=list)
     current_ice_id: UUID | None = None
     broken_subroutine_indices: list[NonNegativeCounter] = Field(default_factory=list)
@@ -456,9 +458,9 @@ class GameState(DomainModel):
                         or ice.location.server.area is not ServerArea.ICE
                         or ice.location.server.server_id != run.server_id):
                     raise ValueError("Run positions must reference installed ice protecting the attacked server")
-            if (run.phase in {"approach", "encounter"}) != (run.current_ice_id is not None):
-                raise ValueError("Only approach and encounter phases have a current ice")
-            if run.phase != "encounter" and (run.strength_boosts or run.broken_subroutine_indices):
+            if (run.phase in {"approach", "encounter", "subroutine_choice"}) != (run.current_ice_id is not None):
+                raise ValueError("Only approach and encounter phases (including subroutine choices) have a current ice")
+            if run.phase not in {"encounter", "subroutine_choice"} and (run.strength_boosts or run.broken_subroutine_indices):
                 raise ValueError("Encounter effects cannot outlast their encounter")
             if len(run.broken_subroutine_indices) != len(set(run.broken_subroutine_indices)):
                 raise ValueError("Each subroutine can be broken only once per encounter")

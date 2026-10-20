@@ -77,7 +77,8 @@ def collect_fact(state: GameState, definitions: Mapping[str, CardDefinition], fa
             if instructions:
                 reactions.append(make_reaction(state, card, fact.type,
                     f"{definition.title}: {fact.type}", instructions, fact))
-        if not active(card, definition):
+        if not active(card, definition) and not (fact.type == "access" and card.installed
+                and card.instance_id == fact.card_instance_id):
             continue
         for ability in definition.triggered_abilities:
             if ability.trigger != fact.type:
@@ -140,6 +141,8 @@ def checkpoint(state: GameState, definitions: Mapping[str, CardDefinition]) -> N
     """Clean up lost hosts, then pause for memory before empty-counter reactions."""
     from .card_movement import trash_installed_card
 
+    if state.winner is not None:
+        return
     while True:
         orphaned = [c for c in state.card_instances.values() if c.location.host_card_instance_id
                     and not state.card_instances[c.location.host_card_instance_id].installed]
@@ -185,7 +188,7 @@ def pending_valid(state: GameState, definitions: Mapping[str, CardDefinition], r
     card = state.card_instances[reaction.card_instance_id]
     if not source_present(state, reaction):
         return False
-    if (reaction.fact.type != "score"
+    if (reaction.fact.type not in {"score", "access"}
             and not (reaction.fact.type == "run_success" and state.run
                      and state.run.source_event_id == card.instance_id)
             and not active(card, definitions[card.definition_id])):

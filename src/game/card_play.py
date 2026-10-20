@@ -64,7 +64,7 @@ def play_card(state: GameState, player: PlayerState, instance_id: UUID,
                       successful_draw=instruction.successful_draw,
                       additional_accesses=instruction.additional_accesses)
             return
-        resolve_effect(state, player, instruction)
+        resolve_effect(state, player, instruction, card)
         if state.winner is not None:
             return
     card.location = ZoneLocation(zone=CardZone.DISCARD_PILE, player_id=player.player_id)
