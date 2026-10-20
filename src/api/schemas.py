@@ -42,7 +42,7 @@ from game.commands import (
     UseCardAbility,
 )
 from game.engine import legal_actions_for, pending_decision
-from game.icebreakers import effective_strength, paid_ability_amount
+from game.icebreakers import effective_strength, paid_ability_label
 from game.installation import agenda_points, installed_programs
 from game.models import (
     CardZone,
@@ -481,8 +481,8 @@ class InitialGameView(ApiModel):
                 title=definition.title,
                 card_type=definition.card_type,
                 ability_labels={a.ability_id: (
-                    a.label.replace("+X", f"+{paid_ability_amount(state, instance, a, card_definitions)}")
-                    if getattr(a, "amount_per_icebreaker", False) else a.label)
+                    paid_ability_label(state, instance, a, card_definitions)
+                    if a in definition.paid_abilities else a.label)
                     for a in (*definition.action_abilities, *definition.paid_abilities)},
                 paid_ability_ids=[a.ability_id for a in definition.paid_abilities],
                 strength=effective_strength(state, instance, definition, card_definitions) if definition.strength is not None else None,
@@ -662,4 +662,4 @@ class CardCatalogEntry(ApiModel):
     @classmethod
     def from_definition(cls, definition: CardDefinition) -> "CardCatalogEntry":
         return cls(**definition.model_dump(exclude={"play_instructions", "score_instructions", "install_instructions",
-                                                   "rez_instructions", "action_abilities", "trash_when_empty", "paid_abilities", "subroutines", "remote_strength_bonus", "triggered_abilities", "first_basic_draw_amount", "install_on_ice", "memory_bonus", "hand_size_bonus", "first_program_discount", "strength_per_icebreaker"}))
+                                                   "rez_instructions", "action_abilities", "trash_when_empty", "paid_abilities", "subroutines", "remote_strength_bonus", "triggered_abilities", "first_basic_draw_amount", "install_on_ice", "memory_bonus", "hand_size_bonus", "first_program_discount", "successful_run_install_discount", "strength_per_icebreaker"}))

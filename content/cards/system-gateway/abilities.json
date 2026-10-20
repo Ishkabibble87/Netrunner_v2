@@ -590,5 +590,68 @@
         ]
       }
     ]
+  },
+  "30015": {
+    "install_instructions": [],
+    "paid_abilities": [
+      {
+        "ability_id": "break_sentry",
+        "label": "Break 1 sentry subroutine · {cost}",
+        "type": "break_subroutines",
+        "credit_cost": 1,
+        "amount": 1,
+        "subtype": "Sentry"
+      },
+      {
+        "ability_id": "boost_strength",
+        "label": "+3 strength · 2 credits",
+        "type": "boost_strength",
+        "credit_cost": 2,
+        "amount": 3
+      }
+    ],
+    "successful_run_install_discount": 2
+  },
+  "30016": {
+    "install_instructions": [],
+    "paid_abilities": [
+      {
+        "ability_id": "break_barrier",
+        "label": "Break 1 barrier subroutine · {cost}",
+        "type": "break_subroutines",
+        "credit_cost": 2,
+        "amount": 1,
+        "subtype": "Barrier",
+        "successful_run_discount": 1
+      },
+      {
+        "ability_id": "boost_strength",
+        "label": "+1 strength · 1 credit",
+        "type": "boost_strength",
+        "credit_cost": 1,
+        "amount": 1
+      }
+    ]
+  },
+  "30032": {
+    "install_instructions": [],
+    "paid_abilities": [
+      {
+        "ability_id": "break_subroutine",
+        "label": "Break 1 subroutine · {cost} · trash at run end",
+        "type": "break_subroutines",
+        "credit_cost": 1,
+        "amount": 1,
+        "subtype": null,
+        "trash_at_run_end": true
+      },
+      {
+        "ability_id": "boost_strength",
+        "label": "+1 strength · 1 credit",
+        "type": "boost_strength",
+        "credit_cost": 1,
+        "amount": 1
+      }
+    ]
   }
 }

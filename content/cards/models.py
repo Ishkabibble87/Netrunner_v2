@@ -133,12 +133,14 @@ class ActionAbility(CardContentModel):
 
 
 class PaidAbility(CardContentModel):
-    """Paid encounter effects with credit or virus costs and authored targets."""
+    """Paid encounter effects with conditional costs, authored targets, and run-end effects."""
 
     ability_id: str = Field(min_length=1)
     label: str = Field(min_length=1)
     type: Literal["boost_strength", "break_subroutines", "lower_ice_strength", "break_host_subroutine"]
     virus_cost: int = Field(default=0, ge=0)
+    successful_run_discount: int = Field(default=0, ge=0)
+    trash_at_run_end: bool = False
     credit_cost: int = Field(ge=0)
     amount: int = Field(gt=0)
     amount_per_icebreaker: bool = False
@@ -168,6 +170,7 @@ class AuthoredAbilities(CardContentModel):
     memory_bonus: int = Field(default=0, ge=0)
     hand_size_bonus: int = Field(default=0, ge=0)
     first_program_discount: int = Field(default=0, ge=0)
+    successful_run_install_discount: int = Field(default=0, ge=0)
     strength_per_icebreaker: int = Field(default=0, ge=0)
 
 
@@ -202,6 +205,7 @@ class CardDefinition(CardContentModel):
     memory_bonus: int = Field(default=0, ge=0)
     hand_size_bonus: int = Field(default=0, ge=0)
     first_program_discount: int = Field(default=0, ge=0)
+    successful_run_install_discount: int = Field(default=0, ge=0)
     strength_per_icebreaker: int = Field(default=0, ge=0)
 
     play_cost: int | None = Field(default=None, ge=0)
