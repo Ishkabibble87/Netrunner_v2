@@ -181,3 +181,15 @@ def installed_programs(state, player, definitions):
     return [c for c in state.card_instances.values() if c.installed
             and c.controller_id == player.player_id
             and definitions[c.definition_id].card_type is CardType.PROGRAM]
+
+
+def advanceable_card(state, player, instance_id, definitions):
+    """Require a controlled installed agenda or explicitly advanceable asset (CR 8.1)."""
+    card = state.card_instances.get(instance_id)
+    definition = definitions.get(card.definition_id) if card else None
+    if (player.role is not PlayerRole.CORP or card is None or not card.installed
+            or card.controller_id != player.player_id or definition is None):
+        raise IllegalCommand("Choose an installed card you control that can be advanced")
+    if definition.advanceable:
+        return card, definition
+    return installed_agenda(state, player, instance_id, definitions)

@@ -38,6 +38,7 @@ from .commands import (
 )
 from .icebreakers import paid_actions, use_paid_ability
 from .installation import (
+    advanceable_card,
     agenda_points,
     install_card,
     installed_agenda,
@@ -209,7 +210,7 @@ def legal_actions_for(
     if player.role is PlayerRole.CORP:
         for card in state.card_instances.values():
             try:
-                installed_agenda(state, player, card.instance_id, definitions)
+                advanceable_card(state, player, card.instance_id, definitions)
             except IllegalCommand:
                 pass
             else:
@@ -280,7 +281,7 @@ def apply_command(
             raise IllegalCommand("Finish the current run before taking another action")
         result = state.model_copy(deep=True)
         resolve_run_command(result, command, card_definitions or {})
-        if isinstance(command, RunServer):
+        if isinstance(command, RunServer) and result.winner is None:
             result.pending_action_fact = RuleFact(type="action", player=player.role, action="run")
         result.turn.step = "before_action"
         advance_run(result, card_definitions or {})
@@ -321,6 +322,7 @@ def apply_command(
             result.card_instances[card.instance_id] = card.model_copy(update={
                 "installed": False, "rezzed": False, "face_up": True, "counters": {}, "loaded_counter_types": set(),
                 "location": ZoneLocation(zone=CardZone.SCORE_AREA, player_id=actor.player_id)})
+            result.turn.printed_agenda_points_scored += definition.agenda_points or 0
             remove_empty_remotes(result)
             # CR 1.17.2: the victory checkpoint precedes scoring reactions.
             if agenda_points(result, actor, definitions) >= 7:
@@ -366,7 +368,7 @@ def apply_command(
     elif isinstance(command, AdvanceCard):
         result = state.model_copy(deep=True)
         actor = _player_for_role(result, player.role)
-        card, _ = installed_agenda(result, actor, command.card_instance_id, card_definitions or {})
+        card, _ = advanceable_card(result, actor, command.card_instance_id, card_definitions or {})
         if actor.credits < 1:
             raise IllegalCommand("Advancing costs 1 credit")
         actor.credits -= 1
@@ -416,8 +418,9 @@ def apply_command(
     else:
         raise IllegalCommand("Unsupported command")
 
-    result.pending_action_fact = RuleFact(type="action", player=player.role,
-        card_instance_id=getattr(command, "card_instance_id", None), action=type(command).__name__)
+    if result.winner is None:
+        result.pending_action_fact = RuleFact(type="action", player=player.role,
+            card_instance_id=getattr(command, "card_instance_id", None), action=type(command).__name__)
     result.turn.step = "before_action"
     checkpoint(result, card_definitions or {})
     advance_run(result, card_definitions or {})
@@ -463,7 +466,7 @@ def pending_decision(state: GameState, definitions=None) -> PendingDecision | No
     if state.setup.pending_player is not None:
         return PendingDecision(player=state.setup.pending_player, type="choose_opening_hand")
     if state.run is not None and state.window is None:
-        kind = {"movement": "continue_run", "breach": "choose_access", "access": "resolve_access"}[state.run.phase]
+        kind = {"movement": "continue_run", "subroutine_choice": "continue_run", "breach": "choose_access", "access": "resolve_access"}[state.run.phase]
         return PendingDecision(player=PlayerRole.RUNNER, type=kind)
     if state.window is not None:
         return PendingDecision(player=state.window.player, type=("paid_ability_window" if state.window.kind == "paid" else "resolve_reaction"))

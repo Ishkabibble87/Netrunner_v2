@@ -77,6 +77,7 @@ class GameProgressTests(unittest.TestCase):
         self.use_run_triggered_cards(session)
         self.use_turn_triggered_economy(session)
         self.use_hosted_viruses(session)
+        self.suffer_damage_and_flatline(session)
 
     def select_and_parse_deck(self) -> DeckSelection:
         deck = load_nrdb_deck(
@@ -907,6 +908,65 @@ class GameProgressTests(unittest.TestCase):
         self.assertIsNone(session.state.run)
         self.assertFalse(session.state.card_instances[mayfly].installed)
         self.assertEqual(session.state.card_instances[mayfly].location.zone, CardZone.DISCARD_PILE)
+
+    def suffer_damage_and_flatline(self, session):
+        """Continue the same game through Karuna's choice and a lethal second run."""
+        def submit(role, command):
+            player = session.state.corp if role is PlayerRole.CORP else session.state.runner
+            self.sessions.submit(session.state.game_id, session.player_tokens[player.player_id], command,
+                                 card_definitions=self.cards)
+
+        def settle():
+            for _ in range(80):
+                state = session.state
+                if not state.window:
+                    return
+                player = state.corp if state.window.player is PlayerRole.CORP else state.runner
+                actions = legal_actions_for(state, player.player_id, self.cards)
+                submit(player.role, actions[0] if state.window.kind == "reaction" else PassPriority())
+            self.fail("Windows did not settle")
+
+        def reach_action(role):
+            for _ in range(80):
+                settle()
+                state = session.state
+                if state.turn.phase is TurnPhase.DISCARD:
+                    player = state.corp if state.turn.active_player is PlayerRole.CORP else state.runner
+                    selection, = legal_actions_for(state, player.player_id, self.cards)
+                    submit(player.role, DiscardCards(selection.eligible_card_instance_ids[:selection.required_count]))
+                elif state.turn.active_player is role:
+                    return
+                else:
+                    submit(state.turn.active_player, GainCredit())
+            self.fail("Expected action phase did not arrive")
+
+        reach_action(PlayerRole.CORP)
+        ice = next(c.instance_id for c in self.cards_in_zone(session.state,
+            session.state.corp.player_id, CardZone.HAND).values() if self.cards[c.definition_id].title == "Karunā")
+        submit(PlayerRole.CORP, InstallCard(ice, "hq"))
+        reach_action(PlayerRole.RUNNER)
+        before = len(self.cards_in_zone(session.state, session.state.runner.player_id, CardZone.HAND))
+        self.assertEqual(before, 3)
+        for lethal in (False, True):
+            submit(PlayerRole.RUNNER, RunServer("hq"))
+            for _ in range(40):
+                state = session.state
+                if state.winner or state.run.phase == "subroutine_choice":
+                    break
+                if (state.window.player is PlayerRole.CORP and state.run.phase == "approach"
+                        and state.run.current_ice_id == ice and not state.card_instances[ice].rezzed):
+                    submit(PlayerRole.CORP, RezCard(ice))
+                else:
+                    submit(state.window.player, PassPriority())
+            if lethal:
+                self.assertEqual(session.state.winner, PlayerRole.CORP)
+                self.assertIsNone(session.state.run)
+                self.assertEqual(legal_actions_for(session.state, session.state.runner.player_id, self.cards), ())
+            else:
+                self.assertEqual(session.state.run.phase, "subroutine_choice")
+                self.assertEqual(len(self.cards_in_zone(session.state, session.state.runner.player_id, CardZone.HAND)), before - 2)
+                submit(PlayerRole.RUNNER, JackOut())
+                settle()
 
     @staticmethod
     def cards_in_zone(state, player_id, zone):

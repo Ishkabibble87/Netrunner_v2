@@ -103,7 +103,25 @@ class TrashSource(CardContentModel):
     type: Literal["trash_source"] = "trash_source"
 
 
-PlayInstruction = Annotated[PlaceVirusCounters | DerezHost | GainCreditsPerVirus | GainCredits | GainAccessCredits | AdditionalAccesses | DrawCards | LoseClickIfAny | LoadCredits | TakeCredits | InitiateRun | TrashSource, Field(discriminator="type")]
+class DealDamage(CardContentModel):
+    """One simultaneous damage packet, optionally calculated from rules context."""
+
+    type: Literal["damage"] = "damage"
+    damage_type: Literal["net", "meat"]
+    amount: int = Field(default=0, ge=0)
+    per_advancement: bool = False
+    scored_this_turn: bool = False
+    trash_source: bool = False
+
+
+class TaggedDamage(CardContentModel):
+    """Orbital Superiority's minimal tagged/untagged scoring branch."""
+
+    type: Literal["tagged_damage"] = "tagged_damage"
+    amount: int = Field(gt=0)
+
+
+PlayInstruction = Annotated[DealDamage | TaggedDamage | PlaceVirusCounters | DerezHost | GainCreditsPerVirus | GainCredits | GainAccessCredits | AdditionalAccesses | DrawCards | LoseClickIfAny | LoadCredits | TakeCredits | InitiateRun | TrashSource, Field(discriminator="type")]
 
 
 class TriggeredAbility(CardContentModel):
@@ -111,7 +129,7 @@ class TriggeredAbility(CardContentModel):
 
     ability_id: str = Field(min_length=1)
     label: str = Field(min_length=1)
-    trigger: Literal["turn_begin", "turn_end", "discard_end", "action", "advance", "install", "rez", "score", "empty", "run_success", "breach", "access_trash", "run_end"]
+    trigger: Literal["turn_begin", "turn_end", "discard_end", "action", "advance", "install", "rez", "score", "empty", "run_success", "breach", "access_trash", "run_end", "access"]
     scope: Literal["controller", "self", "any"] = "controller"
     condition: Literal["previously_unadvanced", "facedown_archives", "installed_virus", "successful_run"] | None = None
     servers: tuple[Literal["hq", "rd", "archives"], ...] | None = None
@@ -152,6 +170,19 @@ class EndRun(CardContentModel):
     label: str = "End the run"
 
 
+class EffectSubroutine(CardContentModel):
+    """Ordered immediate effects, with the two damage-ice follow-up behaviors."""
+
+    type: Literal["effects"] = "effects"
+    label: str
+    instructions: tuple[PlayInstruction, ...]
+    end_run_if_odd_cost: bool = False
+    offer_jack_out: bool = False
+
+
+Subroutine = Annotated[EndRun | EffectSubroutine, Field(discriminator="type")]
+
+
 class AuthoredAbilities(CardContentModel):
     """Executable instructions authored separately from imported display metadata."""
 
@@ -162,7 +193,8 @@ class AuthoredAbilities(CardContentModel):
     action_abilities: tuple[ActionAbility, ...] = ()
     trash_when_empty: bool = False
     paid_abilities: tuple[PaidAbility, ...] = ()
-    subroutines: tuple[EndRun, ...] | None = None
+    subroutines: tuple[Subroutine, ...] | None = None
+    advanceable: bool = False
     remote_strength_bonus: int = Field(default=0, ge=0)
     triggered_abilities: tuple[TriggeredAbility, ...] = ()
     first_basic_draw_amount: int | None = Field(default=None, gt=0)
@@ -197,7 +229,8 @@ class CardDefinition(CardContentModel):
     action_abilities: tuple[ActionAbility, ...] = ()
     trash_when_empty: bool = False
     paid_abilities: tuple[PaidAbility, ...] = ()
-    subroutines: tuple[EndRun, ...] | None = None
+    subroutines: tuple[Subroutine, ...] | None = None
+    advanceable: bool = False
     remote_strength_bonus: int = Field(default=0, ge=0)
     triggered_abilities: tuple[TriggeredAbility, ...] = ()
     first_basic_draw_amount: int | None = Field(default=None, gt=0)

@@ -653,5 +653,131 @@
         "amount": 1
       }
     ]
+  },
+  "30045": {
+    "rez_instructions": [],
+    "advanceable": true,
+    "triggered_abilities": [
+      {
+        "ability_id": "access_damage",
+        "label": "Do 2 net damage plus advancement counters",
+        "trigger": "access",
+        "scope": "self",
+        "instructions": [
+          {
+            "type": "damage",
+            "damage_type": "net",
+            "amount": 2,
+            "per_advancement": true
+          }
+        ]
+      }
+    ]
+  },
+  "30061": {
+    "rez_instructions": [],
+    "advanceable": true,
+    "triggered_abilities": [
+      {
+        "ability_id": "cash_out",
+        "label": "Trash to do meat damage equal to advancement counters",
+        "trigger": "turn_begin",
+        "optional": true,
+        "instructions": [
+          {
+            "type": "damage",
+            "damage_type": "meat",
+            "per_advancement": true,
+            "trash_source": true
+          }
+        ]
+      }
+    ]
+  },
+  "30049": [
+    {
+      "type": "damage",
+      "damage_type": "net",
+      "scored_this_turn": true
+    }
+  ],
+  "30068": {
+    "score_instructions": [
+      {
+        "type": "tagged_damage",
+        "amount": 4
+      }
+    ]
+  },
+  "30046": {
+    "rez_instructions": [],
+    "subroutines": [
+      {
+        "type": "effects",
+        "label": "Do 1 net damage; end the run if the trashed card has an odd printed cost",
+        "instructions": [
+          {
+            "type": "damage",
+            "damage_type": "net",
+            "amount": 1
+          }
+        ],
+        "end_run_if_odd_cost": true
+      }
+    ]
+  },
+  "30047": {
+    "rez_instructions": [],
+    "subroutines": [
+      {
+        "type": "effects",
+        "label": "Do 2 net damage. The Runner may jack out.",
+        "instructions": [
+          {
+            "type": "damage",
+            "damage_type": "net",
+            "amount": 2
+          }
+        ],
+        "offer_jack_out": true
+      },
+      {
+        "type": "effects",
+        "label": "Do 2 net damage",
+        "instructions": [
+          {
+            "type": "damage",
+            "damage_type": "net",
+            "amount": 2
+          }
+        ]
+      }
+    ]
+  },
+  "30073": {
+    "rez_instructions": [],
+    "subroutines": [
+      {
+        "type": "effects",
+        "label": "Do 1 net damage",
+        "instructions": [
+          {
+            "type": "damage",
+            "damage_type": "net",
+            "amount": 1
+          }
+        ]
+      },
+      {
+        "type": "effects",
+        "label": "Gain 1 credit",
+        "instructions": [
+          {
+            "type": "gain_credits",
+            "amount": 1
+          }
+        ]
+      }
+    ]
   }
 }

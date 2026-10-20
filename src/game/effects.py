@@ -6,6 +6,7 @@ helper as basic actions; no printed prose is interpreted at runtime.
 
 from content.cards.models import (
     AdditionalAccesses,
+    DealDamage,
     DerezHost,
     DrawCards,
     GainAccessCredits,
@@ -15,11 +16,13 @@ from content.cards.models import (
     LoseClickIfAny,
     PlaceVirusCounters,
     PlayInstruction,
+    TaggedDamage,
     TakeCredits,
     TrashSource,
 )
 
 from .card_movement import draw_from_deck, trash_installed_card
+from .damage import deal_damage
 from .models import (
     CardInstance,
     GameState,
@@ -31,9 +34,28 @@ from .models import (
 
 def resolve_effect(state: GameState, player: PlayerState, instruction: PlayInstruction,
                    source: CardInstance | None = None, fact: RuleFact | None = None,
-                   *, set_aside_counters: dict[str, int] | None = None) -> None:
+                   *, set_aside_counters: dict[str, int] | None = None) -> tuple[CardInstance, ...] | None:
     """Resolve one effect fully before the next instruction or turn transition."""
-    if isinstance(instruction, PlaceVirusCounters):
+    if isinstance(instruction, DealDamage):
+        counters = set_aside_counters if set_aside_counters is not None else (source.counters if source else {})
+        amount = instruction.amount
+        if instruction.per_advancement:
+            amount += counters.get("advancement", 0)
+        if instruction.scored_this_turn:
+            amount += state.turn.printed_agenda_points_scored
+        if instruction.trash_source:
+            if source is None or not source.installed:
+                return
+            trash_installed_card(state, source)
+            if state.run is None:
+                from .installation import remove_empty_remotes
+                remove_empty_remotes(state)
+        return deal_damage(state, amount, instruction.damage_type)
+    elif isinstance(instruction, TaggedDamage):
+        if state.runner.tags:
+            return deal_damage(state, instruction.amount, "meat")
+        state.runner.tags += 1
+    elif isinstance(instruction, PlaceVirusCounters):
         target = source if instruction.target == "self" else (
             state.card_instances.get(fact.card_instance_id) if fact else None)
         if target is not None and target.installed:

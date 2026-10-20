@@ -78,7 +78,7 @@ class InstallCard:
 
 @dataclass(frozen=True)
 class AdvanceCard:
-    """Spend one click and one credit to advance an installed agenda."""
+    """Spend one click and one credit to advance an installed advanceable card."""
 
     card_instance_id: UUID
 

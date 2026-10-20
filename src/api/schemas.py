@@ -424,7 +424,7 @@ class RunView(ApiModel):
     subroutines: list[SubroutineView] = Field(default_factory=list)
     rez_allowed: bool = False
     accessed_cards: list[CardView]
-    access_note: str = "Card-specific access abilities are not implemented yet."
+    access_note: str = "Access abilities resolve before trashing or stealing."
 
 
 class ReactionView(ApiModel):
@@ -662,4 +662,4 @@ class CardCatalogEntry(ApiModel):
     @classmethod
     def from_definition(cls, definition: CardDefinition) -> "CardCatalogEntry":
         return cls(**definition.model_dump(exclude={"play_instructions", "score_instructions", "install_instructions",
-                                                   "rez_instructions", "action_abilities", "trash_when_empty", "paid_abilities", "subroutines", "remote_strength_bonus", "triggered_abilities", "first_basic_draw_amount", "install_on_ice", "memory_bonus", "hand_size_bonus", "first_program_discount", "successful_run_install_discount", "strength_per_icebreaker"}))
+                                                   "rez_instructions", "action_abilities", "trash_when_empty", "paid_abilities", "subroutines", "advanceable", "remote_strength_bonus", "triggered_abilities", "first_basic_draw_amount", "install_on_ice", "memory_bonus", "hand_size_bonus", "first_program_discount", "successful_run_install_discount", "strength_per_icebreaker"}))

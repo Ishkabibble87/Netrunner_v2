@@ -2,7 +2,7 @@
 
 Each run window carries its continuation so passing resumes the exact timing
 step. Event success effects and access limits are scoped to their initiating run.
-Card-specific access abilities remain unsupported.
+Installed access reactions resolve before mid-access choices.
 """
 
 from collections.abc import Mapping
@@ -17,6 +17,7 @@ from content.cards.models import (
 )
 
 from .commands import AccessCard, ContinueRun, FinishAccess, JackOut, RunServer
+from .effects import resolve_effect
 from .installation import agenda_points, remove_empty_remotes
 from .models import (
     CardZone,
@@ -70,7 +71,7 @@ def candidates(state: GameState) -> tuple[AccessCard, ...]:
 
 def run_actions(state: GameState, definitions: Mapping[str, CardDefinition]):
     """Describe only the Runner's current run decision."""
-    if state.run.phase == "movement":
+    if state.run.phase in {"movement", "subroutine_choice"}:
         return (ContinueRun(), JackOut())
     if state.run.phase == "breach":
         return candidates(state)
@@ -138,7 +139,7 @@ def end_run(state: GameState, definitions: Mapping[str, CardDefinition]) -> None
 
 def advance_run(state: GameState, definitions: Mapping[str, CardDefinition]) -> None:
     """Resume automatic run steps after the entire nested reaction stack settles."""
-    while state.run and state.window is None and state.run.pending_step and not state.memory_trash_pending:
+    while state.winner is None and state.run and state.window is None and state.run.pending_step and not state.memory_trash_pending:
         step = state.run.pending_step
         state.run.pending_step = None
         if step == "breach":
@@ -170,6 +171,10 @@ def resolve_run_command(state: GameState, command, definitions: Mapping[str, Car
         end_run(state, definitions)
         return
     if isinstance(command, ContinueRun):
+        if run.phase == "subroutine_choice":
+            run.phase = "encounter"
+            resolve_subroutines(state, definitions)
+            return
         run_window(state, "approach_next", definitions)  # CR 6.9.4e.
         return
     elif isinstance(command, AccessCard):
@@ -188,6 +193,7 @@ def resolve_run_command(state: GameState, command, definitions: Mapping[str, Car
         run.visible_card_ids.append(card.instance_id)
         run.current_card_id = card.instance_id
         run.phase = "access"
+        emit_fact(state, definitions, run_fact(state, "access", card_instance_id=card.instance_id), auto_single=True)
         return
     elif isinstance(command, FinishAccess):
         card = state.card_instances[run.current_card_id]
@@ -315,17 +321,13 @@ def resume_run(state, continuation, definitions):
         if ice.rezzed:
             run.phase = "encounter"
             run.broken_subroutine_indices = []
+            run.next_subroutine = 0
             run.strength_boosts = {}
             run_window(state, "resolve_subroutines", definitions, rez_allowed=False)
         else:
             enter_movement(state, definitions)
     elif continuation == "resolve_subroutines":
-        definition = definitions[state.card_instances[run.current_ice_id].definition_id]
-        for index, subroutine in enumerate(definition.subroutines or ()):
-            if index not in run.broken_subroutine_indices and subroutine.type == "end_run":
-                end_run(state, definitions)
-                return
-        enter_movement(state, definitions)
+        resolve_subroutines(state, definitions)
     elif continuation == "breach":
         begin_success(state, definitions)
 
@@ -337,3 +339,39 @@ def enter_movement(state, definitions):
     state.run.strength_boosts = {}
     state.run.broken_subroutine_indices = []
     run_window(state, "movement", definitions, rez_allowed=False)  # CR 6.9.4b.
+
+
+def resolve_subroutines(state, definitions):
+    """Resolve unbroken subroutines in order, resuming after Karuna's decision.
+
+    The cursor advances before a choice so declining to jack out cannot replay
+    damage. Damage packets return their trashed cards for Diviner's cost check.
+    """
+    run = state.run
+    ice = state.card_instances[run.current_ice_id]
+    subroutines = definitions[ice.definition_id].subroutines or ()
+    while run.next_subroutine < len(subroutines):
+        index = run.next_subroutine
+        run.next_subroutine += 1
+        if index in run.broken_subroutine_indices:
+            continue
+        subroutine = subroutines[index]
+        if subroutine.type == "end_run":
+            end_run(state, definitions)
+            return
+        trashed = []
+        for instruction in subroutine.instructions:
+            trashed.extend(resolve_effect(state, state.corp, instruction, ice) or ())
+            if state.winner is not None:
+                return
+        if subroutine.end_run_if_odd_cost:
+            for card in trashed:
+                definition = definitions[card.definition_id]
+                cost = definition.play_cost if definition.play_cost is not None else definition.install_cost
+                if cost is not None and cost % 2:
+                    end_run(state, definitions)
+                    return
+        if subroutine.offer_jack_out:
+            run.phase = "subroutine_choice"
+            return
+    enter_movement(state, definitions)
