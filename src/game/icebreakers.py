@@ -21,6 +21,9 @@ def effective_strength(state: GameState, card: CardInstance, definition: CardDef
                        definitions: Mapping[str, CardDefinition]) -> int:
     """Combine live static bonuses with strength paid for this encounter."""
     strength = definition.strength or 0
+    if (card.installed and card.rezzed and definition.advancement_strength_threshold is not None
+            and card.counters.get("advancement", 0) >= definition.advancement_strength_threshold):
+        strength += definition.advancement_strength_bonus
     if card.installed and card.face_up and definition.strength_per_icebreaker:
         strength += definition.strength_per_icebreaker * installed_icebreaker_count(
             state, card.controller_id, definitions)

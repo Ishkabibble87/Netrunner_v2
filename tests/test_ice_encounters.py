@@ -355,6 +355,7 @@ class RunEventTests(RunScenario):
                     if server == "rd":
                         self.assertIsNone(self.view("corp")["run"]["current_card"])
                     self.submit("runner", {"type": "finish_access"})
+                    self.pass_windows()  # Resolve/decline score and steal reactions before the next access.
                 self.assertEqual(len(set(seen)), 2)
                 self.assertIsNone(self.session.state.run)
                 self.assertEqual(self.session.state.card_instances[event].location.zone, CardZone.DISCARD_PILE)

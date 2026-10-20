@@ -83,6 +83,7 @@ class GameProgressTests(unittest.TestCase):
         self.use_hosted_viruses(session)
         self.take_and_remove_a_tag(session)
         self.recycle_cards_with_sprint(session)
+        self.advance_pharos(session)
         self.suffer_damage_and_flatline(session)
 
     def select_and_parse_deck(self) -> DeckSelection:
@@ -105,7 +106,7 @@ class GameProgressTests(unittest.TestCase):
             },
         )
         # Add the later tag and recursion flow, with enough cards for Sprint's draw.
-        return deck.model_copy(update={"card_counts": {**deck.card_counts, "30057": 1, "30041": 1, "30053": 3}})
+        return deck.model_copy(update={"card_counts": {**deck.card_counts, "30057": 1, "30041": 1, "30053": 3, "30063": 1, "30039": 1}})
 
     def select_opponent_and_start_game(self, deck: DeckSelection) -> GameSession:
         opponent = load_opponent_profiles(self.cards)["system-gateway-training"]
@@ -291,7 +292,7 @@ class GameProgressTests(unittest.TestCase):
         titles = ["Hedge Fund", "Government Subsidy", "Offworld Office", "Regolith Mining License",
                   "Sure Gamble", "Creative Commission", "Telework Contract", "VRcation", "Cleaver", "Palisade", "Jailbreak", "Overclock", "Tread Lightly", "Docklands Pass", "Red Team", "Pennyshaver"]
         codes = [next(code for code, card in self.cards.items() if card.title == title) for title in titles]
-        final_cards = ["30009", "30004", "30007", "30002", "30041", "30053", "30032"]
+        final_cards = ["30009", "30004", "30007", "30002", "30063", "30041", "30053", "30032"]
         codes += sorted(set(selection.card_counts) - set(codes) - set(final_cards))
         codes += final_cards
         return [code for code in codes for _ in range(selection.card_counts.get(code, 0))]
@@ -1021,7 +1022,7 @@ class GameProgressTests(unittest.TestCase):
                 player = state.corp if state.turn.active_player is PlayerRole.CORP else state.runner
                 selection, = legal_actions_for(state, player.player_id, self.cards)
                 choices = sorted(selection.eligible_card_instance_ids,
-                    key=lambda i: self.cards[state.card_instances[i].definition_id].title in {"Sprint", "Karunā"})
+                    key=lambda i: self.cards[state.card_instances[i].definition_id].title in {"Sprint", "Karunā", "Pharos"})
                 submit(player.role, DiscardCards(tuple(choices[:selection.required_count])))
             elif state.turn.active_player is PlayerRole.RUNNER:
                 submit(PlayerRole.RUNNER, GainCredit())
@@ -1035,12 +1036,43 @@ class GameProgressTests(unittest.TestCase):
                 self.assertEqual(session.state.window.kind, "target")
                 selection, = legal_actions_for(session.state, state.corp.player_id, self.cards)
                 eligible = sorted(selection.eligible_card_instance_ids,
-                    key=lambda i: self.cards[session.state.card_instances[i].definition_id].title == "Karunā")
+                    key=lambda i: self.cards[session.state.card_instances[i].definition_id].title in {"Karunā", "Pharos"})
                 submit(PlayerRole.CORP, SelectEffectCards(tuple(eligible[:2])))
                 self.assertEqual(len(hand_cards(session.state, session.state.corp)), before)
                 self.assertEqual(session.state.card_instances[sprint.instance_id].location.zone, CardZone.DISCARD_PILE)
                 return
         self.fail("Sprint was not reached")
+
+    def advance_pharos(self, session):
+        """Install and advance authored ice across turns using ordinary actions."""
+        pharos = next(c.instance_id for c in hand_cards(session.state, session.state.corp)
+                      if c.definition_id == "30063")
+        installed = False
+        for _ in range(100):
+            state = session.state
+            role = state.window.player if state.window else state.turn.active_player
+            player = state.corp if role is PlayerRole.CORP else state.runner
+            if state.window:
+                actions = legal_actions_for(state, player.player_id, self.cards)
+                command = actions[0] if state.window.kind == "reaction" else PassPriority()
+            elif state.turn.phase is TurnPhase.DISCARD:
+                selection, = legal_actions_for(state, player.player_id, self.cards)
+                choices = sorted(selection.eligible_card_instance_ids,
+                    key=lambda i: self.cards[state.card_instances[i].definition_id].title in {"Karunā", "Pharos"})
+                command = DiscardCards(tuple(choices[:selection.required_count]))
+            elif role is PlayerRole.RUNNER:
+                command = GainCredit()
+            elif not installed:
+                command = InstallCard(pharos, "archives")
+                installed = True
+            elif state.card_instances[pharos].counters.get("advancement", 0) < 3:
+                command = AdvanceCard(pharos)
+            else:
+                self.assertEqual(state.card_instances[pharos].counters["advancement"], 3)
+                return
+            self.sessions.submit(state.game_id, session.player_tokens[player.player_id], command,
+                                 card_definitions=self.cards)
+        self.fail("Pharos was not advanced")
 
     def suffer_damage_and_flatline(self, session):
         """Continue the same game through Karuna's choice and a lethal second run."""

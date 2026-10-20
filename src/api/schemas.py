@@ -398,6 +398,13 @@ class CardView(ApiModel):
     effective_rez_cost: int | None = None
 
 
+class HiddenSelectionCardView(ApiModel):
+    """An installed target can be chosen by position without revealing its identity."""
+
+    instance_id: UUID
+    title: str = "Unrezzed ice"
+
+
 class InstalledCardView(ApiModel):
     """Public position and counters, with identity concealed from the Runner."""
 
@@ -417,6 +424,7 @@ class TurnView(ApiModel):
     number: int
     active_player: PlayerRole
     phase: str
+    cannot_score: bool = False
 
 
 class PlayerSummary(ApiModel):
@@ -506,7 +514,7 @@ class InitialGameView(ApiModel):
     servers: list[str | int]
     reactions: list[ReactionView] = Field(default_factory=list)
     effect_options: dict[str, str] = Field(default_factory=dict)
-    selection_cards: list[CardView] = Field(default_factory=list)
+    selection_cards: list[CardView | HiddenSelectionCardView] = Field(default_factory=list)
     revealed_cards: list[CardView] = Field(default_factory=list)
     removed_cards: list[CardView] = Field(default_factory=list)
     effect_install: bool = False
@@ -600,7 +608,11 @@ class InitialGameView(ApiModel):
             removed_cards=[card_view(c.instance_id) for c in state.card_instances.values()
                            if c.location.zone is CardZone.REMOVED_FROM_GAME and c.face_up],
             effect_install=bool(state.window and state.window.kind == "install"),
-            selection_cards=[card_view(i) for i in card_selection(state, card_definitions).eligible_card_instance_ids]
+            selection_cards=[HiddenSelectionCardView(instance_id=i)
+                             if (state.card_instances[i].installed and not state.card_instances[i].face_up
+                                 and state.card_instances[i].controller_id != you.player_id)
+                             else card_view(i)
+                             for i in card_selection(state, card_definitions).eligible_card_instance_ids]
                 if state.window and state.window.kind == "target" and state.window.player is you.role else
                 [card_view(i) for i in state.window.install_card_ids]
                 if state.window and state.window.kind == "install" and state.window.player is you.role else [],
@@ -643,6 +655,7 @@ class InitialGameView(ApiModel):
                 number=state.turn.number,
                 active_player=state.turn.active_player,
                 phase=state.turn.phase.value,
+                cannot_score=state.turn.cannot_score,
             ) if state.turn is not None else None,
             winner=state.winner,
             decision=DecisionView(**decision.model_dump()) if decision else None,
@@ -731,4 +744,4 @@ class CardCatalogEntry(ApiModel):
     @classmethod
     def from_definition(cls, definition: CardDefinition) -> "CardCatalogEntry":
         return cls(**definition.model_dump(exclude={"play_requirement", "play_instructions", "score_instructions", "install_instructions",
-                                                   "rez_instructions", "action_abilities", "trash_when_empty", "paid_abilities", "subroutines", "advanceable", "remote_strength_bonus", "triggered_abilities", "first_basic_draw_amount", "install_on_ice", "memory_bonus", "hand_size_bonus", "first_program_discount", "successful_run_install_discount", "strength_per_icebreaker"}))
+                                                   "rez_instructions", "action_abilities", "trash_when_empty", "paid_abilities", "subroutines", "advanceable", "remote_strength_bonus", "triggered_abilities", "first_basic_draw_amount", "install_on_ice", "memory_bonus", "hand_size_bonus", "first_program_discount", "successful_run_install_discount", "strength_per_icebreaker", "advancement_strength_threshold", "advancement_strength_bonus"}))

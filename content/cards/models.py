@@ -43,6 +43,17 @@ class DrawCards(CardContentModel):
     amount: int = Field(gt=0)
 
 
+class GainClicks(CardContentModel):
+    type: Literal["gain_clicks"] = "gain_clicks"
+    amount: int = Field(gt=0)
+
+
+class PreventScoring(CardContentModel):
+    """Prevent further scoring for the remainder of this turn."""
+
+    type: Literal["prevent_scoring"] = "prevent_scoring"
+
+
 class LoseClickIfAny(CardContentModel):
     type: Literal["lose_click_if_any"]
 
@@ -150,7 +161,7 @@ class SelectCards(CardContentModel):
     side: Literal["corp", "runner", "any"]
     card_types: tuple[CardType, ...] = ()
     count: int = Field(default=1, gt=0)
-    effect: Literal["trash", "place_advancement", "to_hand", "shuffle", "search", "install"] = "trash"
+    effect: Literal["trash", "place_advancement", "to_hand", "shuffle", "search", "install", "swap_ice", "rez"] = "trash"
     subtypes: tuple[str, ...] = ()
     exclude_types: tuple[CardType, ...] = ()
     up_to: bool = False
@@ -195,7 +206,7 @@ class TaggedDamage(CardContentModel):
     amount: int = Field(gt=0)
 
 
-PlayInstruction = Annotated[SelectCards | TrashAccessed | GiveTags | ChooseEffect | PreventStealTrash | EndRunEffect | LoseCredits | DealDamage | TaggedDamage | PlaceVirusCounters | DerezHost | GainCreditsPerVirus | GainCredits | GainAccessCredits | AdditionalAccesses | DrawCards | LoseClickIfAny | LoadCredits | TakeCredits | InitiateRun | TrashSource, Field(discriminator="type")]
+PlayInstruction = Annotated[GainClicks | PreventScoring | SelectCards | TrashAccessed | GiveTags | ChooseEffect | PreventStealTrash | EndRunEffect | LoseCredits | DealDamage | TaggedDamage | PlaceVirusCounters | DerezHost | GainCreditsPerVirus | GainCredits | GainAccessCredits | AdditionalAccesses | DrawCards | LoseClickIfAny | LoadCredits | TakeCredits | InitiateRun | TrashSource, Field(discriminator="type")]
 
 
 class TriggeredAbility(CardContentModel):
@@ -283,6 +294,8 @@ class AuthoredAbilities(CardContentModel):
     first_program_discount: int = Field(default=0, ge=0)
     successful_run_install_discount: int = Field(default=0, ge=0)
     strength_per_icebreaker: int = Field(default=0, ge=0)
+    advancement_strength_threshold: int | None = Field(default=None, gt=0)
+    advancement_strength_bonus: int = Field(default=0, ge=0)
 
 
 class CardDefinition(CardContentModel):
@@ -320,6 +333,8 @@ class CardDefinition(CardContentModel):
     first_program_discount: int = Field(default=0, ge=0)
     successful_run_install_discount: int = Field(default=0, ge=0)
     strength_per_icebreaker: int = Field(default=0, ge=0)
+    advancement_strength_threshold: int | None = Field(default=None, gt=0)
+    advancement_strength_bonus: int = Field(default=0, ge=0)
 
     play_cost: int | None = Field(default=None, ge=0)
     install_cost: int | None = Field(default=None, ge=0)

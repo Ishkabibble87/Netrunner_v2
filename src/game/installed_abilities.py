@@ -41,13 +41,20 @@ def controlled_card(state: GameState, player: PlayerState, instance_id: UUID,
 
 
 def validate_rez(state: GameState, player: PlayerState, instance_id: UUID,
-                 definitions: Mapping[str, CardDefinition]) -> tuple[CardInstance, CardDefinition]:
+                 definitions: Mapping[str, CardDefinition], *, during_effect: bool = False,
+                 ignore_costs: bool = False) -> tuple[CardInstance, CardDefinition]:
     """Reject unsupported cards, insufficient funds, and invalid rez windows."""
     card, definition = controlled_card(state, player, instance_id, definitions)
     if (player.role is not PlayerRole.CORP or definition.side is not CardSide.CORP
             or definition.card_type not in {CardType.ASSET, CardType.UPGRADE, CardType.ICE}
             or card.rezzed or definition.rez_instructions is None):
         raise IllegalCommand("Choose an unrezzed Corp card with supported abilities")
+    if definition.card_type is CardType.ICE and definition.subroutines is None:
+        raise IllegalCommand("Choose ice with supported subroutines")
+    if during_effect:
+        if not ignore_costs and (rez_cost(state, definition) is None or player.credits < rez_cost(state, definition)):
+            raise IllegalCommand("Not enough credits to rez this card")
+        return card, definition
     if state.window is None or state.window.kind != "paid" or state.window.player is not player.role:
         raise IllegalCommand("Rez only while you have priority in an eligible paid ability window")
     if not state.window.rez_allowed:
@@ -60,6 +67,17 @@ def validate_rez(state: GameState, player: PlayerState, instance_id: UUID,
     if cost is None or player.credits < cost:
         raise IllegalCommand("Not enough credits to rez this card")
     return card, definition
+
+
+def rez_card(state, player, instance_id, definitions, *, during_effect=False, ignore_costs=False):
+    """Share payment, activation and rez reactions with effect-directed rezzing."""
+    card, definition = validate_rez(state, player, instance_id, definitions,
+                                    during_effect=during_effect, ignore_costs=ignore_costs)
+    if not ignore_costs:
+        player.credits -= rez_cost(state, definition)
+    card.face_up = True
+    card.rezzed = True
+    resolve_lifecycle(state, player, card, definitions, trigger="rez")
 
 
 def resolve_lifecycle(state: GameState, player: PlayerState, card: CardInstance,

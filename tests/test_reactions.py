@@ -114,6 +114,9 @@ class ReactionScenario(unittest.TestCase):
         for _ in range(30):
             if self.state.run is None or self.state.run.phase == "ended":
                 return
+            if self.state.window:
+                self.submit(self.state.window.player, {"type": "pass_priority"})
+                continue
             actions = self.view(PlayerRole.RUNNER)["legal_actions"]
             action = next((a for a in actions if a["type"] in {"access_card", "finish_access"}), None)
             self.assertIsNotNone(action, actions)

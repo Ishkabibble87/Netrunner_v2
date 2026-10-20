@@ -27,9 +27,21 @@ def selection_candidates(state, instruction, definitions):
                  or (instruction.zone == "installed" and card.installed))
             and (not instruction.card_types or definitions[card.definition_id].card_type in instruction.card_types)
             and definitions[card.definition_id].card_type not in instruction.exclude_types
+            and (instruction.effect != "rez" or _can_rez(state, card.instance_id, instruction, definitions))
             and all(s in definitions[card.definition_id].subtypes for s in instruction.subtypes)
             and (not instruction.not_installed_this_turn or card.installed_turn != state.turn.number
                  or card.owner_id != (state.corp if instruction.player == "corp" else state.runner).player_id)))
+
+
+def _can_rez(state, instance_id, instruction, definitions):
+    from .installed_abilities import validate_rez
+
+    try:
+        validate_rez(state, state.corp, instance_id, definitions, during_effect=True,
+                     ignore_costs=instruction.ignore_costs)
+    except IllegalCommand:
+        return False
+    return True
 
 
 def card_selection(state, definitions):
@@ -80,6 +92,8 @@ def open_selection(state, instruction, source, fact, definitions):
         from .effect_installation import open_install
         open_install(state, instruction, source, fact, definitions)
         return
+    if instruction.effect == "swap_ice" and len(selection_candidates(state, instruction, definitions)) < 2:
+        return  # A swap requires two cards, even when other effects resolve partially.
     if not selection_candidates(state, instruction, definitions):
         if instruction.effect in {"search", "shuffle"}:
             from .card_movement import shuffle_into_deck
@@ -120,7 +134,15 @@ def resolve_selection(state, definitions, command):
     instruction = window.selection
     owner = state.corp if instruction.side == "corp" else state.runner
     cards = [state.card_instances[i] for i in selected]
-    if instruction.effect == "shuffle":
+    if instruction.effect == "swap_ice" and cards:
+        from .card_movement import swap_installed_ice
+        swap_installed_ice(state, *cards)
+    elif instruction.effect == "rez":
+        from .installed_abilities import rez_card
+        for card in cards:
+            rez_card(state, state.corp, card.instance_id, definitions,
+                     during_effect=True, ignore_costs=instruction.ignore_costs)
+    elif instruction.effect == "shuffle":
         from .card_movement import shuffle_into_deck
         shuffle_into_deck(state, owner.player_id, cards)
     elif instruction.effect == "search":
@@ -140,7 +162,7 @@ def resolve_selection(state, definitions, command):
                 card.location = ZoneLocation(zone=CardZone.HAND, player_id=owner.player_id)
     for instance_id in selected:
         card = state.card_instances[instance_id]
-        if instruction.effect in {"shuffle", "search"}:
+        if instruction.effect in {"shuffle", "search", "swap_ice", "rez"}:
             continue
         if instruction.effect == "to_hand":
             card.location = ZoneLocation(zone=CardZone.HAND, player_id=owner.player_id)
