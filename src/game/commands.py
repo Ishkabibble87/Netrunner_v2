@@ -152,4 +152,18 @@ class UseCardAbility:
     server_id: ServerId | None = None
 
 
-GameCommand = TrashPrograms | RezCard | UseCardAbility | RunServer | ContinueRun | JackOut | AccessCard | FinishAccess | InstallCard | AdvanceCard | ScoreAgenda | PassPriority | ResolveReaction | ChooseMulligan | GainCredit | DrawCard | RemoveTag | PurgeVirusCounters | DiscardCards | PlayCard
+@dataclass(frozen=True)
+class ChooseEffectOption:
+    """Choose one currently offered, affordable effect branch."""
+
+    option_id: str
+
+
+@dataclass(frozen=True)
+class TrashResource:
+    """Spend one Corp click and two credits to trash a tagged Runner's resource."""
+
+    card_instance_id: UUID
+
+
+GameCommand = ChooseEffectOption | TrashResource | TrashPrograms | RezCard | UseCardAbility | RunServer | ContinueRun | JackOut | AccessCard | FinishAccess | InstallCard | AdvanceCard | ScoreAgenda | PassPriority | ResolveReaction | ChooseMulligan | GainCredit | DrawCard | RemoveTag | PurgeVirusCounters | DiscardCards | PlayCard

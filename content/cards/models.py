@@ -114,6 +114,32 @@ class DealDamage(CardContentModel):
     trash_source: bool = False
 
 
+class GiveTags(CardContentModel):
+    """One tag-taking occurrence, even when multiple tags are given."""
+
+    type: Literal["give_tags"] = "give_tags"
+    amount: int = Field(gt=0)
+
+
+class EndRunEffect(CardContentModel):
+    type: Literal["end_run"] = "end_run"
+
+
+class EffectOption(CardContentModel):
+    """A Task 7 decision branch; broader modes and targets belong to Task 8."""
+
+    option_id: str = Field(min_length=1)
+    label: str = Field(min_length=1)
+    credit_cost: int = Field(default=0, ge=0)
+    instructions: tuple[Annotated[GiveTags | EndRunEffect | GainCredits | DrawCards, Field(discriminator="type")], ...] = ()
+
+
+class ChooseEffect(CardContentModel):
+    type: Literal["choose_effect"] = "choose_effect"
+    player: Literal["corp", "runner"]
+    options: tuple[EffectOption, ...] = Field(min_length=2)
+
+
 class TaggedDamage(CardContentModel):
     """Orbital Superiority's minimal tagged/untagged scoring branch."""
 
@@ -121,7 +147,7 @@ class TaggedDamage(CardContentModel):
     amount: int = Field(gt=0)
 
 
-PlayInstruction = Annotated[DealDamage | TaggedDamage | PlaceVirusCounters | DerezHost | GainCreditsPerVirus | GainCredits | GainAccessCredits | AdditionalAccesses | DrawCards | LoseClickIfAny | LoadCredits | TakeCredits | InitiateRun | TrashSource, Field(discriminator="type")]
+PlayInstruction = Annotated[GiveTags | ChooseEffect | EndRunEffect | DealDamage | TaggedDamage | PlaceVirusCounters | DerezHost | GainCreditsPerVirus | GainCredits | GainAccessCredits | AdditionalAccesses | DrawCards | LoseClickIfAny | LoadCredits | TakeCredits | InitiateRun | TrashSource, Field(discriminator="type")]
 
 
 class TriggeredAbility(CardContentModel):
@@ -129,9 +155,10 @@ class TriggeredAbility(CardContentModel):
 
     ability_id: str = Field(min_length=1)
     label: str = Field(min_length=1)
-    trigger: Literal["turn_begin", "turn_end", "discard_end", "action", "advance", "install", "rez", "score", "empty", "run_success", "breach", "access_trash", "run_end", "access"]
+    trigger: Literal["turn_begin", "turn_end", "discard_end", "action", "advance", "install", "rez", "score", "steal", "encounter", "take_tags", "empty", "run_success", "breach", "access_trash", "run_end", "access"]
     scope: Literal["controller", "self", "any"] = "controller"
-    condition: Literal["previously_unadvanced", "facedown_archives", "installed_virus", "successful_run"] | None = None
+    condition: Literal["previously_unadvanced", "facedown_archives", "installed_virus", "successful_run", "run_on_source_server", "agenda_stolen_here"] | None = None
+    persistent: bool = False
     servers: tuple[Literal["hq", "rd", "archives"], ...] | None = None
     optional: bool = False
     once_per_turn: bool = False
@@ -187,6 +214,7 @@ class AuthoredAbilities(CardContentModel):
     """Executable instructions authored separately from imported display metadata."""
 
     play_instructions: tuple[PlayInstruction, ...] | None = None
+    play_requirement: Literal["tagged", "successful_run_last_turn"] | None = None
     score_instructions: tuple[PlayInstruction, ...] | None = None
     install_instructions: tuple[PlayInstruction, ...] | None = None
     rez_instructions: tuple[PlayInstruction, ...] | None = None
@@ -214,6 +242,7 @@ class CardDefinition(CardContentModel):
         description="Unique card code from the NSG card data, distinct from game instance IDs",
     )
     title: str = Field(min_length=1)
+    play_requirement: Literal["tagged", "successful_run_last_turn"] | None = None
     side: CardSide
     card_type: CardType
     faction_code: str = Field(min_length=1)

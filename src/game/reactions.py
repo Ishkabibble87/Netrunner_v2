@@ -27,6 +27,7 @@ from .models import (
     PlayerState,
     PriorityWindow,
     RuleFact,
+    ZoneLocation,
 )
 from .modifiers import memory_limit, memory_used
 from .setup import IllegalCommand
@@ -46,7 +47,7 @@ def make_reaction(
     instructions: tuple[PlayInstruction, ...], fact: RuleFact, *, optional: bool = False,
     once_per_turn: bool = False, condition: str | None = None,
 ) -> PendingReaction:
-    player = state.corp if card.controller_id == state.corp.player_id else state.runner
+    player = state.corp if (card.controller_id or card.owner_id) == state.corp.player_id else state.runner
     return PendingReaction(
         reaction_id=uuid4(), card_instance_id=card.instance_id,
         ability_id=ability_id, label=label, player=player.role, fact=fact,
@@ -77,13 +78,17 @@ def collect_fact(state: GameState, definitions: Mapping[str, CardDefinition], fa
             if instructions:
                 reactions.append(make_reaction(state, card, fact.type,
                     f"{definition.title}: {fact.type}", instructions, fact))
-        if not active(card, definition) and not (fact.type == "access" and card.installed
-                and card.instance_id == fact.card_instance_id):
+        persisting = bool(state.run and fact.type == "run_end" and card.instance_id in state.run.persistent_sources)
+        if not active(card, definition) and not persisting and not (
+                fact.type in {"access", "steal"} and card.instance_id == fact.card_instance_id
+                and (fact.type == "steal" or card.installed)):
             continue
         for ability in definition.triggered_abilities:
             if ability.trigger != fact.type:
                 continue
-            controller = state.corp if card.controller_id == state.corp.player_id else state.runner
+            if persisting and not ability.persistent:
+                continue
+            controller = state.corp if (card.controller_id or card.owner_id) == state.corp.player_id else state.runner
             if ability.scope == "controller" and controller.role is not fact.player:
                 continue
             if ability.scope == "self" and card.instance_id != fact.card_instance_id:
@@ -96,6 +101,12 @@ def collect_fact(state: GameState, definitions: Mapping[str, CardDefinition], fa
                     continue
             if ability.condition == "successful_run" and (not state.run or not state.run.successful):
                 continue
+            if ability.condition in {"run_on_source_server", "agenda_stolen_here"}:
+                location = state.run.persistent_sources[card.instance_id] if persisting else card.location
+                if not state.run or not location.server or location.server.server_id != state.run.server_id:
+                    continue
+                if ability.condition == "agenda_stolen_here" and not state.run.agendas_stolen:
+                    continue
             if ability.condition == "previously_unadvanced" and fact.previous_advancement != 0:
                 continue
             if ability.servers is not None and fact.server_id not in ability.servers:
@@ -108,6 +119,7 @@ def collect_fact(state: GameState, definitions: Mapping[str, CardDefinition], fa
                 f"{definition.title}: {ability.label}", ability.instructions, fact,
                 optional=ability.optional or ability.once_per_turn,
                 once_per_turn=ability.once_per_turn, condition=ability.condition))
+            reactions[-1].persistent = persisting
     return reactions
 
 
@@ -188,7 +200,8 @@ def pending_valid(state: GameState, definitions: Mapping[str, CardDefinition], r
     card = state.card_instances[reaction.card_instance_id]
     if not source_present(state, reaction):
         return False
-    if (reaction.fact.type not in {"score", "access"}
+    if (reaction.fact.type not in {"score", "steal", "access"}
+            and not reaction.persistent
             and not (reaction.fact.type == "run_success" and state.run
                      and state.run.source_event_id == card.instance_id)
             and not active(card, definitions[card.definition_id])):
@@ -206,6 +219,9 @@ def settle_reactions(state: GameState, definitions: Mapping[str, CardDefinition]
             continuation = window.resolving
             reaction = continuation.reaction
             if continuation.next_instruction == len(reaction.instructions):
+                if reaction.discard_after_resolution and source_present(state, reaction):
+                    card = state.card_instances[reaction.card_instance_id]
+                    card.location = ZoneLocation(zone=CardZone.DISCARD_PILE, player_id=card.owner_id)
                 window.resolving = None
                 continue
             instruction = reaction.instructions[continuation.next_instruction]
@@ -218,7 +234,8 @@ def settle_reactions(state: GameState, definitions: Mapping[str, CardDefinition]
                 source = state.card_instances[reaction.card_instance_id] if source_present(state, reaction) else None
                 before = state.model_dump() if reaction.once_per_turn else None
                 resolve_effect(state, player, instruction, source, reaction.fact,
-                               set_aside_counters=reaction.set_aside_counters if reaction.set_aside_counters else None)
+                               set_aside_counters=reaction.set_aside_counters if reaction.set_aside_counters else None,
+                               definitions=definitions)
                 if reaction.once_per_turn and before != state.model_dump() and source_present(state, reaction):
                     state.card_instances[reaction.card_instance_id].ability_last_used_turn[reaction.ability_id] = state.turn.number
             checkpoint(state, definitions)
@@ -269,6 +286,16 @@ def resolve_sequence(state: GameState, definitions: Mapping[str, CardDefinition]
     reaction = make_reaction(state, card, ability.ability_id, ability.label,
         ability.instructions, RuleFact(type="action", player=player.role, card_instance_id=card.instance_id))
     reaction.set_aside_counters = set_aside_counters or {}
+    open_reactions(state, definitions, [reaction], auto_single=True)
+
+
+def resolve_instructions(state, definitions, player, card, instructions, ability_id, label,
+                         *, fact=None, discard_after=False):
+    """Resolve a mandatory sequence with checkpoints and an optional play cleanup."""
+    reaction = make_reaction(state, card, ability_id, label, instructions,
+        fact or RuleFact(type="action", player=player.role, card_instance_id=card.instance_id))
+    reaction.discard_after_resolution = discard_after
+    reaction.player = player.role
     open_reactions(state, definitions, [reaction], auto_single=True)
 
 

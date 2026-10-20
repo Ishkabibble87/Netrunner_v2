@@ -18,6 +18,7 @@ from content.opponents.loader import load_opponent_profiles
 from game.commands import (
     AccessCard,
     AdvanceCard,
+    ChooseEffectOption,
     ChooseMulligan,
     ContinueRun,
     DiscardCards,
@@ -30,6 +31,7 @@ from game.commands import (
     PassPriority,
     PlayCard,
     PurgeVirusCounters,
+    RemoveTag,
     ResolveReaction,
     RezCard,
     RunServer,
@@ -77,6 +79,7 @@ class GameProgressTests(unittest.TestCase):
         self.use_run_triggered_cards(session)
         self.use_turn_triggered_economy(session)
         self.use_hosted_viruses(session)
+        self.take_and_remove_a_tag(session)
         self.suffer_damage_and_flatline(session)
 
     def select_and_parse_deck(self) -> DeckSelection:
@@ -98,12 +101,14 @@ class GameProgressTests(unittest.TestCase):
                 "Whitespace": 2, "Karunā": 2, "Tithe": 2,
             },
         )
-        return deck
+        # Add one real tag operation for the later continuation of this scenario.
+        return deck.model_copy(update={"card_counts": {**deck.card_counts, "30057": 1}})
 
     def select_opponent_and_start_game(self, deck: DeckSelection) -> GameSession:
         opponent = load_opponent_profiles(self.cards)["system-gateway-training"]
         # Add real virus cards to this scenario's deck without altering reusable decks.
         selections = dict(opponent.deck_selections)
+        selections[PlayerRole.CORP] = deck
         runner_deck = selections[PlayerRole.RUNNER]
         selections[PlayerRole.RUNNER] = runner_deck.model_copy(update={
             "card_counts": {**runner_deck.card_counts, "30009": 1, "30004": 1, "30007": 1}})
@@ -190,7 +195,8 @@ class GameProgressTests(unittest.TestCase):
         self.assertEqual(state.corp.credits, 5)
         self.assertEqual(state.corp.clicks_remaining, 3)
         self.assertEqual(len(self.cards_in_zone(state, state.corp.player_id, CardZone.HAND)), 6)
-        self.assertEqual(len(self.cards_in_zone(state, state.corp.player_id, CardZone.DECK)), 28)
+        self.assertEqual(len(self.cards_in_zone(state, state.corp.player_id, CardZone.DECK)),
+                         sum(state.corp.deck_selection.card_counts.values()) - 6)
         self.assertEqual(
             legal_actions_for(state, state.corp.player_id),
             (GainCredit(), DrawCard(), PurgeVirusCounters()),
@@ -908,6 +914,65 @@ class GameProgressTests(unittest.TestCase):
         self.assertIsNone(session.state.run)
         self.assertFalse(session.state.card_instances[mayfly].installed)
         self.assertEqual(session.state.card_instances[mayfly].location.zone, CardZone.DISCARD_PILE)
+
+    def take_and_remove_a_tag(self, session):
+        """Continue the same game through last-turn history and a Runner decision."""
+        def submit(role, command):
+            player = session.state.corp if role is PlayerRole.CORP else session.state.runner
+            self.sessions.submit(session.state.game_id, session.player_tokens[player.player_id], command,
+                                 card_definitions=self.cards)
+
+        def settle():
+            while session.state.window:
+                state = session.state
+                player = state.corp if state.window.player is PlayerRole.CORP else state.runner
+                actions = legal_actions_for(state, player.player_id, self.cards)
+                submit(player.role, actions[0] if state.window.kind == "reaction" else PassPriority())
+
+        def action_for(role):
+            for _ in range(80):
+                settle()
+                state = session.state
+                if state.turn.phase is TurnPhase.DISCARD:
+                    player = state.corp if state.turn.active_player is PlayerRole.CORP else state.runner
+                    selection, = legal_actions_for(state, player.player_id, self.cards)
+                    choices = sorted(selection.eligible_card_instance_ids,
+                        key=lambda i: self.cards[state.card_instances[i].definition_id].title in {"Public Trail", "Karunā"})
+                    submit(player.role, DiscardCards(tuple(choices[:selection.required_count])))
+                elif state.turn.active_player is role:
+                    return
+                else:
+                    submit(state.turn.active_player, GainCredit())
+            self.fail("Expected action window did not arrive")
+
+        runner, corp = PlayerRole.RUNNER, PlayerRole.CORP
+        action_for(runner)
+        submit(runner, RunServer("hq"))
+        settle()
+        submit(runner, ContinueRun())
+        settle()
+        with patch("game.runs.SystemRandom") as random:
+            random.return_value.choice.side_effect = lambda cards: next(
+                c for c in cards if self.cards[c.definition_id].card_type.value != "agenda")
+            while session.state.run:
+                submit(runner, AccessCard("hq"))
+                submit(runner, FinishAccess())
+                settle()
+        action_for(corp)
+        self.assertTrue(session.state.runner_last_turn_successful)
+        trail = next(c.instance_id for c in self.cards_in_zone(session.state,
+            session.state.corp.player_id, CardZone.HAND).values() if self.cards[c.definition_id].title == "Public Trail")
+        submit(corp, PlayCard(trail))
+        self.assertEqual(session.state.window.player, runner)
+        self.assertEqual(session.state.window.kind, "choice")
+        submit(runner, ChooseEffectOption("take_tag"))
+        self.assertEqual(session.state.runner.tags, 1)
+        self.assertEqual(session.state.card_instances[trail].location.zone, CardZone.DISCARD_PILE)
+        action_for(runner)
+        before = session.state.runner.credits
+        submit(runner, RemoveTag())
+        self.assertEqual(session.state.runner.tags, 0)
+        self.assertEqual(session.state.runner.credits, before - 2)
 
     def suffer_damage_and_flatline(self, session):
         """Continue the same game through Karuna's choice and a lethal second run."""

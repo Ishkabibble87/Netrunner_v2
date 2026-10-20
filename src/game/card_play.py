@@ -33,6 +33,10 @@ def validate_card_play(state: GameState, player: PlayerState, instance_id: UUID,
         raise IllegalCommand("Only your side's events or operations can be played")
     if definition.play_instructions is None or definition.play_cost is None:
         raise IllegalCommand("This card's play ability is not implemented")
+    if definition.play_requirement == "tagged" and not state.runner.tags:
+        raise IllegalCommand("Play only if the Runner is tagged")
+    if definition.play_requirement == "successful_run_last_turn" and not state.runner_last_turn_successful:
+        raise IllegalCommand("Play only after a successful run during the Runner's last turn")
     if player.credits < definition.play_cost:
         raise IllegalCommand(f"Playing {definition.title} costs {definition.play_cost} credits")
     run = next((i for i in definition.play_instructions if isinstance(i, InitiateRun)), None)
@@ -56,6 +60,11 @@ def play_card(state: GameState, player: PlayerState, instance_id: UUID,
     card.face_up = True
     card.location = ZoneLocation(zone=CardZone.PLAY_AREA)
     player.credits -= definition.play_cost
+    if not any(isinstance(i, InitiateRun) for i in definition.play_instructions):
+        from .reactions import resolve_instructions
+        resolve_instructions(state, definitions, player, card, definition.play_instructions,
+                             "play", definition.title, discard_after=True)
+        return
     for instruction in definition.play_instructions:
         if isinstance(instruction, InitiateRun):
             if instruction.hosted_credits:
@@ -64,7 +73,7 @@ def play_card(state: GameState, player: PlayerState, instance_id: UUID,
                       successful_draw=instruction.successful_draw,
                       additional_accesses=instruction.additional_accesses)
             return
-        resolve_effect(state, player, instruction, card)
+        resolve_effect(state, player, instruction, card, definitions=definitions)
         if state.winner is not None:
             return
     card.location = ZoneLocation(zone=CardZone.DISCARD_PILE, player_id=player.player_id)

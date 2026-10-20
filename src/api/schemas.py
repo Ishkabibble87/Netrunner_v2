@@ -20,6 +20,7 @@ from content.opponents.models import OpponentProfile
 from game.commands import (
     AccessCard,
     AdvanceCard,
+    ChooseEffectOption,
     ChooseMulligan,
     ContinueRun,
     DiscardCards,
@@ -39,6 +40,7 @@ from game.commands import (
     RunServer,
     ScoreAgenda,
     TrashPrograms,
+    TrashResource,
     UseCardAbility,
 )
 from game.engine import legal_actions_for, pending_decision
@@ -97,6 +99,18 @@ class RemoveTagCommandRequest(ApiModel):
     type: Literal["remove_tag"]
 
 
+class ChooseEffectOptionRequest(ApiModel):
+    """Select an offered effect; labels are projected separately by the server."""
+
+    type: Literal["choose_effect_option"]
+    option_id: str
+
+
+class TrashResourceRequest(ApiModel):
+    type: Literal["trash_resource"]
+    card_instance_id: UUID
+
+
 class PlayCardCommandRequest(ApiModel):
     """Identify the physical copy; costs and instructions are server-owned."""
 
@@ -131,7 +145,7 @@ class DecisionView(ApiModel):
     """Public context shared by both players, never hidden card choices."""
 
     player: PlayerRole
-    type: Literal["choose_opening_hand", "choose_action", "discard_to_hand_limit", "paid_ability_window", "resolve_reaction", "continue_run", "choose_access", "resolve_access", "trash_for_memory"]
+    type: Literal["choose_opening_hand", "choose_action", "discard_to_hand_limit", "paid_ability_window", "resolve_reaction", "choose_effect", "continue_run", "choose_access", "resolve_access", "trash_for_memory"]
     cards_to_discard: int | None = None
 
 
@@ -216,6 +230,8 @@ PlayerCommandRequest = Annotated[
     | GainCreditCommandRequest
     | DrawCardCommandRequest
     | RemoveTagCommandRequest
+    | ChooseEffectOptionRequest
+    | TrashResourceRequest
     | PurgeVirusCountersCommandRequest
     | DiscardCardsCommandRequest
     | TrashProgramsCommandRequest
@@ -236,6 +252,10 @@ LegalAction = PlayerCommandRequest | DiscardCardsAction
 
 def game_command_from_request(request: PlayerCommandRequest) -> GameCommand:
     """Translate a validated API command into the transport-independent game type."""
+    if isinstance(request, ChooseEffectOptionRequest):
+        return ChooseEffectOption(request.option_id)
+    if isinstance(request, TrashResourceRequest):
+        return TrashResource(request.card_instance_id)
     if isinstance(request, TrashProgramsCommandRequest):
         return TrashPrograms(tuple(request.card_instance_ids))
     if isinstance(request, RunServerCommandRequest):
@@ -281,6 +301,10 @@ def game_command_from_request(request: PlayerCommandRequest) -> GameCommand:
 
 def command_request_from_game(command: GameCommand | DiscardSelection) -> LegalAction:
     """Project a domain command into the shape clients can submit and display."""
+    if isinstance(command, ChooseEffectOption):
+        return ChooseEffectOptionRequest(type="choose_effect_option", option_id=command.option_id)
+    if isinstance(command, TrashResource):
+        return TrashResourceRequest(type="trash_resource", card_instance_id=command.card_instance_id)
     if isinstance(command, RunServer):
         return RunServerCommandRequest(type="run_server", server_id=command.server_id)
     if isinstance(command, ContinueRun):
@@ -453,6 +477,7 @@ class InitialGameView(ApiModel):
     opponent: OpponentView
     servers: list[str | int]
     reactions: list[ReactionView] = Field(default_factory=list)
+    effect_options: dict[str, str] = Field(default_factory=dict)
     installed_cards: list[InstalledCardView]
     run: RunView | None = None
 
@@ -538,6 +563,8 @@ class InitialGameView(ApiModel):
                            or state.card_instances[i].location.zone is not CardZone.DECK}
         decision = pending_decision(state, card_definitions)
         return cls(
+            effect_options={o.option_id: o.label for o in state.window.choice.options}
+                if state.window and state.window.kind == "choice" and state.window.player is you.role else {},
             run=RunView(
                 server_id=state.run.server_id, phase=state.run.phase,
                 successful=state.run.successful,
@@ -661,5 +688,5 @@ class CardCatalogEntry(ApiModel):
 
     @classmethod
     def from_definition(cls, definition: CardDefinition) -> "CardCatalogEntry":
-        return cls(**definition.model_dump(exclude={"play_instructions", "score_instructions", "install_instructions",
+        return cls(**definition.model_dump(exclude={"play_requirement", "play_instructions", "score_instructions", "install_instructions",
                                                    "rez_instructions", "action_abilities", "trash_when_empty", "paid_abilities", "subroutines", "advanceable", "remote_strength_bonus", "triggered_abilities", "first_basic_draw_amount", "install_on_ice", "memory_bonus", "hand_size_bonus", "first_program_discount", "successful_run_install_discount", "strength_per_icebreaker"}))

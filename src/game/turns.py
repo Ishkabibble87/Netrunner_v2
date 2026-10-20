@@ -75,6 +75,8 @@ def advance_turn(state: GameState, definitions=None) -> None:
             # Both conditions are met at the same timing point (CR 5.6.3d/5.7.2d).
             collect_turn_end(state, definitions or {}, player.role)
         else:
+            if player.role is PlayerRole.RUNNER:
+                state.runner_last_turn_successful = turn.successful_run
             next_role = PlayerRole.RUNNER if player.role is PlayerRole.CORP else PlayerRole.CORP
             state.turn = TurnState(number=turn.number + 1, active_player=next_role,
                                    phase=TurnPhase.DRAW if next_role is PlayerRole.CORP else TurnPhase.ACTION,

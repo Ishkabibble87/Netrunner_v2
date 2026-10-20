@@ -188,6 +188,13 @@ class GameScreen:
                             suffix += " · subroutines " + ", ".join(str(i + 1) for i in targets)
                         label = f"{title}: {ability}{suffix}"
                     choices.append(MenuChoice(label, "action", dict(action)))
+                elif action_type == "choose_effect_option" and self.submit_action is not None:
+                    label = self.state.get("effect_options", {}).get(action["option_id"], action["option_id"])
+                    choices.append(MenuChoice(label, "action", dict(action)))
+                elif action_type == "trash_resource" and self.submit_action is not None:
+                    card = next((c["card"] for c in self.state.get("installed_cards", [])
+                                 if c["instance_id"] == action["card_instance_id"] and c.get("card")), {})
+                    choices.append(MenuChoice(f"Trash {card.get('title', 'resource')} · 1 click, 2 credits", "action", dict(action)))
                 elif action_type == "resolve_reaction" and self.submit_action is not None:
                     reaction = next((r for r in self.state.get("reactions", [])
                                      if r["reaction_id"] == action.get("reaction_id")), {})
@@ -626,6 +633,9 @@ class GameScreen:
         if (self.state.get("run") or {}).get("phase") == "subroutine_choice":
             return "Jack out or continue resolving subroutines" if self.viewer_role == "runner" else "Runner may jack out"
         decision = self.state.get("decision") or {}
+        if decision.get("type") == "choose_effect":
+            who = "You" if decision["player"] == self.viewer_role else str(decision["player"]).title()
+            return f"{who}: choose an effect"
         if decision.get("type") in {"paid_ability_window", "resolve_reaction"}:
             who = "You" if decision["player"] == self.viewer_role else str(decision["player"]).title()
             return f"{who}: " + ("paid ability window · act or pass" if decision["type"] == "paid_ability_window" else "resolve reaction")
