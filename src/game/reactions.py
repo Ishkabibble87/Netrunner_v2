@@ -28,12 +28,15 @@ from .models import (
     PriorityWindow,
     RuleFact,
 )
+from .modifiers import memory_limit, memory_used
 from .setup import IllegalCommand
 
 
 def active(card: CardInstance, definition: CardDefinition) -> bool:
-    """Identities and face-up Runner cards or rezzed Corp cards are active."""
+    """Active sources include identities, Corp-scored agendas and installed cards."""
     return (card.location.zone is CardZone.IDENTITY or
+            (card.location.zone is CardZone.SCORE_AREA and definition.side.value == "corp"
+             and card.location.player_id == card.owner_id) or
             (card.installed and card.face_up and
              (definition.side.value == "runner" or card.rezzed)))
 
@@ -126,7 +129,10 @@ def open_reactions(state: GameState, definitions: Mapping[str, CardDefinition],
 
 
 def checkpoint(state: GameState, definitions: Mapping[str, CardDefinition]) -> None:
-    """Collect empty-counter conditions once per pending/resolving source ability."""
+    """Pause for excess memory before collecting empty-counter conditions."""
+    state.memory_trash_pending = memory_used(state, definitions) > memory_limit(state, state.runner, definitions)
+    if state.memory_trash_pending:
+        return
     windows = [state.window, *state.suspended_windows]
     occupied = {(r.card_instance_id, r.ability_id) for w in windows if w
                 for r in [*w.reactions, *([w.resolving.reaction] if w.resolving else [])]}
@@ -173,7 +179,8 @@ def pending_valid(state: GameState, definitions: Mapping[str, CardDefinition], r
 
 def settle_reactions(state: GameState, definitions: Mapping[str, CardDefinition]) -> None:
     """Run automatic instructions, stopping for the next player's reaction choice."""
-    while state.window and state.window.kind == "reaction" and state.winner is None:
+    while (state.window and state.window.kind == "reaction" and state.winner is None
+           and not state.memory_trash_pending):
         window = state.window
         if window.resolving:
             continuation = window.resolving

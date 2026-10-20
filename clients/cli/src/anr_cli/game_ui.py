@@ -164,7 +164,9 @@ class GameScreen:
                         trash_titles = [c["card"]["title"] for c in self.state.get("installed_cards", [])
                                         if c["instance_id"] in action.get("trash_card_instance_ids", []) and c.get("card")]
                         replacement = " · trash " + ", ".join(trash_titles) if trash_titles else ""
-                        cost = self.card_catalog.get(card["definition_id"], {}).get("install_cost")
+                        cost = card.get("effective_install_cost")
+                        if cost is None:
+                            cost = self.card_catalog.get(card["definition_id"], {}).get("install_cost")
                         suffix = f" · {cost} {'credit' if cost == 1 else 'credits'}" if action.get("server_id") is None else ""
                         choices.append(MenuChoice(f"Install {card['title']} in {target}{replacement} · 1 click{suffix}", "action", dict(action)))
                 elif action_type in {"rez_card", "use_card_ability"} and self.submit_action is not None:
@@ -196,6 +198,10 @@ class GameScreen:
                     verb = {"advance_card": "Advance", "score_agenda": "Score"}[action_type]
                     suffix = " · 1 credit" if action_type == "advance_card" else ""
                     choices.append(MenuChoice(f"{verb} {card.get('title', 'agenda')}{suffix}", "action", dict(action)))
+                elif action_type == "trash_programs" and self.submit_action is not None:
+                    titles = [c["card"]["title"] for c in self.state.get("installed_cards", [])
+                              if c["instance_id"] in action["card_instance_ids"] and c.get("card")]
+                    choices.append(MenuChoice("Trash " + ", ".join(titles) + " to free memory", "action", dict(action)))
                 elif action_type == "discard_cards" and self.submit_action is not None:
                     choices.append(MenuChoice(f"Discard {action['required_count']} cards", "discard", action))
                 elif self.submit_action is not None:
@@ -400,6 +406,8 @@ class GameScreen:
             f"{runner.get('credits', 0)} credits · {runner_hand} cards in grip"
         )
         runner_stats += f" · {runner.get('memory_used', 0)}/{runner.get('memory_limit', 4)} MU"
+        corp_stats += f" · hand limit {corp.get('maximum_hand_size', 5)}"
+        runner_stats += f" · hand limit {runner.get('maximum_hand_size', 5)}"
         if runner.get("tags", 0):
             runner_stats += f" · {runner['tags']} tags"
         if self.viewer_role == "corp":
@@ -461,6 +469,8 @@ class GameScreen:
             action_prompt = "Review your hand, then keep it or take one mulligan."
         elif pending_player is not None:
             action_prompt = f"Waiting for {str(pending_player).title()} to choose an opening hand."
+        elif (self.state.get("decision") or {}).get("type") == "trash_for_memory":
+            action_prompt = "The Runner must trash programs to fit available memory."
         elif (self.state.get("decision") or {}).get("type") == "discard_to_hand_limit":
             action_prompt = self._status_text()
         elif (self.state.get("decision") or {}).get("player") not in (None, self.viewer_role):

@@ -135,7 +135,7 @@ def end_run(state: GameState, definitions: Mapping[str, CardDefinition]) -> None
 
 def advance_run(state: GameState, definitions: Mapping[str, CardDefinition]) -> None:
     """Resume automatic run steps after the entire nested reaction stack settles."""
-    while state.run and state.window is None and state.run.pending_step:
+    while state.run and state.window is None and state.run.pending_step and not state.memory_trash_pending:
         step = state.run.pending_step
         state.run.pending_step = None
         if step == "breach":

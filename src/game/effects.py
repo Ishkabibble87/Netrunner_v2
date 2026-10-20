@@ -16,15 +16,13 @@ from content.cards.models import (
     TrashSource,
 )
 
-from .card_movement import draw_from_deck
+from .card_movement import draw_from_deck, trash_installed_card
 from .models import (
     CardInstance,
-    CardZone,
     GameState,
     PlayerRole,
     PlayerState,
     RuleFact,
-    ZoneLocation,
 )
 
 
@@ -33,11 +31,7 @@ def resolve_effect(state: GameState, player: PlayerState, instruction: PlayInstr
     """Resolve one effect fully before the next instruction or turn transition."""
     if isinstance(instruction, TrashSource):
         if source is not None:
-            state.card_instances[source.instance_id] = source.model_copy(update={
-                "installed": False, "rezzed": False, "face_up": True,
-                "controller_id": None, "counters": {}, "loaded_counter_types": set(), "ability_last_used_turn": {},
-                "location": ZoneLocation(zone=CardZone.DISCARD_PILE, player_id=source.owner_id),
-            })
+            trash_installed_card(state, source)
             if state.run is None:
                 from .installation import remove_empty_remotes
                 remove_empty_remotes(state)
@@ -49,7 +43,7 @@ def resolve_effect(state: GameState, player: PlayerState, instruction: PlayInstr
             source.loaded_counter_types.add("credit")
             source.counters["credit"] = hosted + instruction.amount
         else:
-            amount = min(hosted, instruction.amount)
+            amount = hosted if instruction.amount == "all" else min(hosted, instruction.amount)
             source.counters["credit"] = hosted - amount
             player.credits += amount
     elif isinstance(instruction, GainAccessCredits):

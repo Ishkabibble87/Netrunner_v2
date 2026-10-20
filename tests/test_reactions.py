@@ -25,7 +25,8 @@ from game.reactions import checkpoint, emit_fact
 from game.turns import advance_turn, hand_cards
 
 
-class ReactionTests(unittest.TestCase):
+class ReactionScenario(unittest.TestCase):
+    """Two authenticated players with helpers for isolated timing scenarios."""
     def setUp(self):
         self.app = create_app()
         self.cards = self.app.state.card_definitions
@@ -119,6 +120,7 @@ class ReactionTests(unittest.TestCase):
             self.submit(PlayerRole.RUNNER, action)
         self.fail("Breach did not finish")
 
+class ReactionTests(ReactionScenario):
     def test_loup_trash_reaction_suspends_access_and_only_first_trash_pays(self):
         self.runner_identity("30001")
         first = self.add_card("30071", PlayerRole.CORP)  # Regolith
