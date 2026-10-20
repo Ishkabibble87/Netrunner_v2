@@ -57,21 +57,34 @@ class TakeCredits(CardContentModel):
     amount: int = Field(gt=0)
 
 
+class GainAccessCredits(CardContentModel):
+    """Gain one credit per access occurrence in the triggering run."""
+
+    type: Literal["gain_access_credits"] = "gain_access_credits"
+
+
+class AdditionalAccesses(CardContentModel):
+    type: Literal["additional_accesses"] = "additional_accesses"
+    amount: int = Field(gt=0)
+
+
 class InitiateRun(CardContentModel):
-    """Run targets and effects scoped to the run created by this event."""
+    """Run targets and effects scoped to the run created by a card ability."""
 
     type: Literal["initiate_run"]
     servers: tuple[Literal["hq", "rd", "archives"], ...] | None = None
     successful_draw: int = Field(default=0, ge=0)
     additional_accesses: int = Field(default=0, ge=0)
     hosted_credits: int = Field(default=0, ge=0)
+    unrun_this_turn: bool = False
+    successful_take_credits: int = Field(default=0, ge=0)
 
 
 class TrashSource(CardContentModel):
     type: Literal["trash_source"] = "trash_source"
 
 
-PlayInstruction = Annotated[GainCredits | DrawCards | LoseClickIfAny | LoadCredits | TakeCredits | InitiateRun | TrashSource, Field(discriminator="type")]
+PlayInstruction = Annotated[GainCredits | GainAccessCredits | AdditionalAccesses | DrawCards | LoseClickIfAny | LoadCredits | TakeCredits | InitiateRun | TrashSource, Field(discriminator="type")]
 
 
 class TriggeredAbility(CardContentModel):
@@ -79,9 +92,10 @@ class TriggeredAbility(CardContentModel):
 
     ability_id: str = Field(min_length=1)
     label: str = Field(min_length=1)
-    trigger: Literal["turn_begin", "turn_end", "discard_end", "action", "advance", "install", "rez", "score", "empty"]
+    trigger: Literal["turn_begin", "turn_end", "discard_end", "action", "advance", "install", "rez", "score", "empty", "run_success", "breach", "access_trash", "run_end"]
     scope: Literal["controller", "self", "any"] = "controller"
     condition: Literal["previously_unadvanced", "facedown_archives"] | None = None
+    servers: tuple[Literal["hq", "rd", "archives"], ...] | None = None
     optional: bool = False
     once_per_turn: bool = False
     first_each_turn: bool = False

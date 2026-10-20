@@ -6,7 +6,7 @@ module starts with the state needed once both players have joined.
 
 from enum import StrEnum
 from typing import Annotated, Literal
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -239,13 +239,14 @@ class PlayerState(DomainModel):
 
 
 class TurnState(DomainModel):
-    """The current turn; click count lives with its owning player."""
+    """Turn-scoped rules history and occurrences; clicks live with each player."""
 
     number: int = Field(ge=1)
     active_player: PlayerRole
     phase: TurnPhase
     step: Literal["start", "turn_begin", "mandatory_draw", "before_action", "action", "discard", "end", "next_turn"] = "action"
     occurrences: dict[str, int] = Field(default_factory=dict)
+    servers_run: set[ServerId] = Field(default_factory=set)
 
     @model_validator(mode="after")
     def runner_has_no_draw_phase(self) -> "TurnState":
@@ -262,6 +263,12 @@ class RuleFact(DomainModel):
     card_instance_id: UUID | None = None
     previous_advancement: int | None = None
     action: str | None = None
+    run_id: UUID | None = None
+    server_id: ServerId | None = None
+    access_count: int = Field(default=0, ge=0)
+    agendas_stolen: int = Field(default=0, ge=0)
+    source_card_id: UUID | None = None
+    source_ability_id: str | None = None
 
 
 class PendingReaction(DomainModel):
@@ -305,14 +312,22 @@ class PriorityWindow(DomainModel):
 
 
 class RunState(DomainModel):
-    """A paused run and its current encounter; card visibility lasts only through its breach.
+    """A run and its originating ability, retained through run-end reactions.
 
     Remote cleanup is deferred until the run ends because remote IDs are display
     positions and may be renumbered when the accessed card leaves its server.
     """
 
+    run_id: UUID = Field(default_factory=uuid4)
+    source_card_id: UUID | None = None
+    source_ability_id: str | None = None
+    source_location: ZoneLocation | None = None
+    successful_take_credits: int = Field(default=0, ge=0)
+    access_count: int = Field(default=0, ge=0)
+    agendas_stolen: int = Field(default=0, ge=0)
+    pending_step: Literal["breach", "access_choices", "finish_access", "cleanup"] | None = None
     server_id: ServerId
-    phase: Literal["initiation", "approach", "encounter", "movement", "breach", "access"] = "movement"
+    phase: Literal["initiation", "approach", "encounter", "movement", "success", "breach", "access", "ended"] = "movement"
     remaining_ice_ids: list[UUID] = Field(default_factory=list)
     current_ice_id: UUID | None = None
     broken_subroutine_indices: list[NonNegativeCounter] = Field(default_factory=list)

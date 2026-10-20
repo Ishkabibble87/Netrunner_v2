@@ -48,8 +48,8 @@ def validate_install(state: GameState, player: PlayerState, command: InstallCard
         if (card is None or definition is None or card.owner_id != player.player_id
                 or card.controller_id != player.player_id or card.location.zone is not CardZone.HAND
                 or card.location.player_id != player.player_id or definition.side is not CardSide.RUNNER
-                or definition.card_type not in {CardType.RESOURCE, CardType.PROGRAM} or definition.install_instructions is None):
-            raise IllegalCommand("Choose a supported resource or program from your hand")
+                or definition.card_type not in {CardType.RESOURCE, CardType.PROGRAM, CardType.HARDWARE} or definition.install_instructions is None):
+            raise IllegalCommand("Choose a supported resource, program, or hardware from your hand")
         if command.server_id is not None:
             raise IllegalCommand("Runner cards have no server destination")
         trash_ids = set(command.trash_card_instance_ids)

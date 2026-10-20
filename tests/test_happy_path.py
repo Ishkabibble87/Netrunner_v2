@@ -72,6 +72,7 @@ class GameProgressTests(unittest.TestCase):
         self.use_installed_economy(session)
         self.break_through_ice(session)
         self.run_from_events(session)
+        self.use_run_triggered_cards(session)
         self.use_turn_triggered_economy(session)
 
     def select_and_parse_deck(self) -> DeckSelection:
@@ -269,7 +270,7 @@ class GameProgressTests(unittest.TestCase):
         by all three Offices. Remaining copies follow in definition-ID order.
         """
         titles = ["Hedge Fund", "Government Subsidy", "Offworld Office", "Regolith Mining License",
-                  "Sure Gamble", "Creative Commission", "Telework Contract", "VRcation", "Cleaver", "Palisade", "Jailbreak", "Overclock"]
+                  "Sure Gamble", "Creative Commission", "Telework Contract", "VRcation", "Cleaver", "Palisade", "Jailbreak", "Overclock", "Docklands Pass", "Red Team"]
         codes = [next(code for code, card in self.cards.items() if card.title == title) for title in titles]
         codes += sorted(set(selection.card_counts) - set(codes))
         return [code for code in codes for _ in range(selection.card_counts.get(code, 0))]
@@ -659,6 +660,75 @@ class GameProgressTests(unittest.TestCase):
         self.assertIsNone(session.state.run)
         self.assertEqual(session.state.card_instances[overclock].location.zone, CardZone.DISCARD_PILE)
         self.assertEqual(session.state.card_instances[overclock].counters, {})
+
+    def use_run_triggered_cards(self, session):
+        """Install hardware and run with Red Team through a multiaccess breach."""
+        runner = PlayerRole.RUNNER
+        wanted = {"Docklands Pass", "Red Team"}
+
+        def submit(role, command):
+            player = session.state.corp if role is PlayerRole.CORP else session.state.runner
+            self.sessions.submit(session.state.game_id, session.player_tokens[player.player_id], command,
+                                 card_definitions=self.cards)
+
+        def settle():
+            for _ in range(150):
+                state = session.state
+                if state.window:
+                    if state.window.kind == "reaction":
+                        choices = legal_actions_for(state, state.runner.player_id, self.cards)
+                        submit(runner, next(a for a in choices if isinstance(a, ResolveReaction) and not a.decline))
+                    else:
+                        submit(state.window.player, PassPriority())
+                elif state.turn.phase is TurnPhase.DISCARD:
+                    player = state.corp if state.turn.active_player is PlayerRole.CORP else state.runner
+                    selection, = legal_actions_for(state, player.player_id, self.cards)
+                    choices = sorted(selection.eligible_card_instance_ids,
+                                     key=lambda i: self.cards[state.card_instances[i].definition_id].title in wanted)
+                    submit(player.role, DiscardCards(tuple(choices[:selection.required_count])))
+                elif state.turn.active_player is runner:
+                    return
+                else:
+                    submit(PlayerRole.CORP, GainCredit())
+            self.fail("Runner action did not arrive")
+
+        for _ in range(30):
+            settle()
+            found = {self.cards[c.definition_id].title: c.instance_id for c in
+                     self.cards_in_zone(session.state, session.state.runner.player_id, CardZone.HAND).values()
+                     if self.cards[c.definition_id].title in wanted}
+            if wanted <= found.keys():
+                break
+            submit(runner, DrawCard())
+        self.assertEqual(found.keys(), wanted)
+        turn = session.state.turn.number
+        while session.state.turn.number == turn:
+            settle()
+            if session.state.turn.number == turn:
+                submit(runner, GainCredit())
+        settle()
+        for title in ("Docklands Pass", "Red Team"):
+            submit(runner, InstallCard(found[title]))
+            settle()
+        team = found["Red Team"]
+        self.assertEqual(session.state.card_instances[team].counters["credit"], 12)
+        credits = session.state.runner.credits
+        submit(runner, UseCardAbility(team, "run_central", server_id="hq"))
+        settle()
+        self.assertEqual(session.state.run.source_card_id, team)
+        submit(runner, ContinueRun())
+        settle()
+        self.assertEqual(session.state.runner.credits, credits + 3)
+        self.assertEqual(session.state.card_instances[team].counters["credit"], 9)
+        self.assertEqual(session.state.run.access_limit, 2)
+        for _ in range(2):
+            submit(runner, AccessCard("hq"))
+            submit(runner, FinishAccess())
+        self.assertIsNone(session.state.run)
+        settle()
+        targets = {a.server_id for a in legal_actions_for(session.state, session.state.runner.player_id, self.cards)
+                   if isinstance(a, UseCardAbility) and a.card_instance_id == team}
+        self.assertEqual(targets, {"rd", "archives"})
 
     def use_turn_triggered_economy(self, session):
         """Continue the core game through installation, loading and a turn-start payout."""

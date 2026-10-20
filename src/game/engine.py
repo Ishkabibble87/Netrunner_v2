@@ -8,7 +8,7 @@ from collections.abc import Mapping
 from itertools import combinations
 from uuid import UUID
 
-from content.cards.models import CardDefinition
+from content.cards.models import CardDefinition, InitiateRun
 
 from .card_movement import draw_from_deck
 from .card_play import play_card, validate_card_play
@@ -63,7 +63,13 @@ from .models import (
 )
 from .priority import pass_priority
 from .reactions import basic_draw_amount, emit_fact, pass_reactions, resolve_reaction
-from .runs import resolve_run_command, resume_run, run_actions, runnable_servers
+from .runs import (
+    advance_run,
+    resolve_run_command,
+    resume_run,
+    run_actions,
+    runnable_servers,
+)
 from .setup import IllegalCommand, choose_mulligan
 from .turns import advance_turn, hand_cards, maximum_hand_size
 
@@ -142,12 +148,14 @@ def legal_actions_for(
     for card in state.card_instances.values():
         definition = definitions.get(card.definition_id)
         for ability in definition.action_abilities if definition else ():
-            command = UseCardAbility(card.instance_id, ability.ability_id)
-            try:
-                validate_ability(state, player, command, definitions)
-            except IllegalCommand:
-                continue
-            actions.append(command)
+            targets = state.servers if any(isinstance(i, InitiateRun) for i in ability.instructions) else (None,)
+            for target in targets:
+                command = UseCardAbility(card.instance_id, ability.ability_id, server_id=target)
+                try:
+                    validate_ability(state, player, command, definitions)
+                except IllegalCommand:
+                    continue
+                actions.append(command)
     if player.role is PlayerRole.RUNNER:
         actions.extend(RunServer(server) for server in runnable_servers(state))
         for card in hand_cards(state, player):
@@ -233,6 +241,7 @@ def apply_command(
         if isinstance(command, RunServer):
             result.pending_action_fact = RuleFact(type="action", player=player.role, action="run")
         result.turn.step = "before_action"
+        advance_run(result, card_definitions or {})
         advance_turn(result, card_definitions)
         return GameState.model_validate(result.model_dump())
     if isinstance(command, (PassPriority, ScoreAgenda, ResolveReaction, RezCard)) or (state.window is not None and isinstance(command, UseCardAbility)):
@@ -282,6 +291,7 @@ def apply_command(
             if result.window.kind != "reaction":
                 raise IllegalCommand("Choose a pending reaction")
             resolve_reaction(result, definitions, command)
+        advance_run(result, card_definitions or {})
         advance_turn(result, card_definitions)
         return GameState.model_validate(result.model_dump())
     if isinstance(command, DiscardCards):
@@ -367,6 +377,7 @@ def apply_command(
     result.pending_action_fact = RuleFact(type="action", player=player.role,
         card_instance_id=getattr(command, "card_instance_id", None), action=type(command).__name__)
     result.turn.step = "before_action"
+    advance_run(result, card_definitions or {})
     advance_turn(result, card_definitions)
     return GameState.model_validate(result.model_dump())
 

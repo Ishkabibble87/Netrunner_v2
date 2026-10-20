@@ -8,9 +8,14 @@ Card-specific access abilities remain unsupported.
 from collections.abc import Mapping
 from random import SystemRandom
 
-from content.cards.models import CardDefinition, CardType
+from content.cards.models import (
+    CardDefinition,
+    CardType,
+    DrawCards,
+    InitiateRun,
+    TakeCredits,
+)
 
-from .card_movement import draw_from_deck
 from .commands import AccessCard, ContinueRun, FinishAccess, JackOut, RunServer
 from .installation import agenda_points, remove_empty_remotes
 from .models import (
@@ -18,12 +23,20 @@ from .models import (
     CentralServer,
     GameState,
     PlayerRole,
+    RuleFact,
     RunState,
     ServerArea,
     ZoneLocation,
 )
 from .payments import runner_funds, spend_runner_credits
 from .priority import open_paid_window
+from .reactions import (
+    collect_fact,
+    emit_fact,
+    make_reaction,
+    open_reactions,
+    source_present,
+)
 from .setup import IllegalCommand
 
 
@@ -71,8 +84,25 @@ def run_actions(state: GameState, definitions: Mapping[str, CardDefinition]):
     return tuple(choices)
 
 
-def end_run(state: GameState) -> None:
-    """Discard the run fund and visibility, then clean up emptied remote rows."""
+def validate_run_target(state: GameState, instruction: InitiateRun, server_id) -> None:
+    """Validate authored restrictions before paying a run action's costs."""
+    if (server_id not in state.servers
+            or (instruction.servers is not None and server_id not in instruction.servers)
+            or (instruction.unrun_this_turn and server_id in state.turn.servers_run)):
+        raise IllegalCommand("Choose a legal server not excluded by this run ability")
+
+
+def run_fact(state: GameState, kind: str, *, card_instance_id=None) -> RuleFact:
+    """Snapshot rules context without exposing accessed card identities to clients."""
+    run = state.run
+    return RuleFact(type=kind, player=PlayerRole.RUNNER, card_instance_id=card_instance_id,
+                    run_id=run.run_id, server_id=run.server_id, access_count=run.access_count,
+                    agendas_stolen=run.agendas_stolen, source_card_id=run.source_card_id,
+                    source_ability_id=run.source_ability_id)
+
+
+def cleanup_run(state: GameState) -> None:
+    """Release context only after run-end reactions, then resume the initiating action."""
     source_event_id = state.run.source_event_id
     state.window = None
     state.run = None
@@ -81,6 +111,45 @@ def end_run(state: GameState) -> None:
         event.counters.clear()
         event.location = ZoneLocation(zone=CardZone.DISCARD_PILE, player_id=state.runner.player_id)
     remove_empty_remotes(state)
+
+
+def end_run(state: GameState, definitions: Mapping[str, CardDefinition]) -> None:
+    """Expire run-only funds before run-end reactions (CR 6.9.6), retaining context."""
+    run = state.run
+    state.window = None
+    run.current_card_id = None
+    run.current_ice_id = None
+    run.strength_boosts = {}
+    run.broken_subroutine_indices = []
+    run.bad_publicity_credits = 0
+    if run.source_event_id:
+        state.card_instances[run.source_event_id].counters.clear()
+    run.phase = "ended"
+    run.pending_step = "cleanup"
+    if state.winner is None:
+        emit_fact(state, definitions, run_fact(state, "run_end"))
+    else:
+        state.suspended_windows.clear()
+        cleanup_run(state)
+
+
+def advance_run(state: GameState, definitions: Mapping[str, CardDefinition]) -> None:
+    """Resume automatic run steps after the entire nested reaction stack settles."""
+    while state.run and state.window is None and state.run.pending_step:
+        step = state.run.pending_step
+        state.run.pending_step = None
+        if step == "breach":
+            begin_breach(state, definitions)
+        elif step == "finish_access":
+            state.run.current_card_id = None
+            state.run.phase = "breach"
+            if not candidates(state):
+                end_run(state, definitions)
+        elif step == "access_choices":
+            if not candidates(state):
+                end_run(state, definitions)
+        elif step == "cleanup":
+            cleanup_run(state)
 
 
 def resolve_run_command(state: GameState, command, definitions: Mapping[str, CardDefinition]) -> None:
@@ -95,7 +164,7 @@ def resolve_run_command(state: GameState, command, definitions: Mapping[str, Car
     if command not in run_actions(state, definitions):
         raise IllegalCommand("That choice is not available during this run")
     if isinstance(command, JackOut):
-        end_run(state)
+        end_run(state, definitions)
         return
     if isinstance(command, ContinueRun):
         run_window(state, "approach_next", definitions)  # CR 6.9.4e.
@@ -111,6 +180,7 @@ def resolve_run_command(state: GameState, command, definitions: Mapping[str, Car
             run.central_accesses += 1
         else:
             card = state.card_instances[command.target]
+        run.access_count += 1
         run.accessed_card_ids.append(card.instance_id)
         run.visible_card_ids.append(card.instance_id)
         run.current_card_id = card.instance_id
@@ -129,6 +199,7 @@ def resolve_run_command(state: GameState, command, definitions: Mapping[str, Car
                 spend_runner_credits(state, cost)
                 destination = ZoneLocation(zone=CardZone.DISCARD_PILE, player_id=state.corp.player_id)
             else:
+                run.agendas_stolen += 1
                 destination = ZoneLocation(zone=CardZone.SCORE_AREA, player_id=state.runner.player_id)
             state.card_instances[card.instance_id] = card.model_copy(update={
                 "location": destination, "installed": False, "rezzed": False,
@@ -145,34 +216,65 @@ def resolve_run_command(state: GameState, command, definitions: Mapping[str, Car
                 run.accessed_card_ids.remove(card.instance_id)
             if agenda_points(state, state.runner, definitions) >= 7:
                 state.winner = PlayerRole.RUNNER
-                end_run(state)
+                end_run(state, definitions)
                 return
-        run.current_card_id = None
-        run.phase = "breach"
-    if not candidates(state):
-        end_run(state)
+        run.pending_step = "finish_access"
+        if command.trash:
+            emit_fact(state, definitions, run_fact(state, "access_trash", card_instance_id=card.instance_id))
 
 
-def begin_breach(state: GameState) -> None:
-    """Resolve success effects before starting the breach (CR 6.7.4, 7.5.3)."""
-    state.run.successful = True
-    draw_from_deck(state, state.runner.player_id, state.run.successful_draw)
-    state.run.access_limit += state.run.additional_accesses
-    state.run.phase = "breach"
-    if state.run.server_id is CentralServer.ARCHIVES:
+def begin_success(state: GameState, definitions: Mapping[str, CardDefinition]) -> None:
+    """Resolve successful-run abilities before the breach begins (CR 6.9.5a)."""
+    run = state.run
+    run.successful = True
+    run.phase = "success"
+    run.pending_step = "breach"
+    fact = run_fact(state, "run_success")
+    reactions = collect_fact(state, definitions, fact)
+    source_id = run.source_card_id
+    instructions = []
+    if run.successful_draw:
+        instructions.append(DrawCards(type="draw_cards", amount=run.successful_draw))
+    if run.successful_take_credits:
+        instructions.append(TakeCredits(type="take_credits", amount=run.successful_take_credits))
+    if source_id and instructions:
+        card = state.card_instances[source_id]
+        reaction = make_reaction(state, card, run.source_ability_id or "run_success",
+                                f"{definitions[card.definition_id].title}: successful run",
+                                tuple(instructions), fact)
+        reaction.source_location = run.source_location
+        # A moved source cannot supply a delayed payout. Installed sources can also
+        # disappear at the empty-counter checkpoint without losing the run origin.
+        if source_present(state, reaction):
+            reactions.append(reaction)
+    open_reactions(state, definitions, reactions, auto_single=True)
+
+
+def begin_breach(state: GameState, definitions: Mapping[str, CardDefinition]) -> None:
+    """Open breach reactions separately, before offering any access candidates."""
+    run = state.run
+    run.access_limit += run.additional_accesses
+    run.phase = "breach"
+    if run.server_id is CentralServer.ARCHIVES:
         for card in state.card_instances.values():
             if card.location.zone is CardZone.DISCARD_PILE and card.owner_id == state.corp.player_id:
                 card.face_up = True
-    if not candidates(state):
-        end_run(state)
+    run.pending_step = "access_choices"
+    emit_fact(state, definitions, run_fact(state, "breach"))
 
 
 def start_run(state, server_id, definitions, *, source_event_id=None,
-              successful_draw=0, additional_accesses=0):
+              successful_draw=0, additional_accesses=0, source_card_id=None,
+              source_ability_id=None, successful_take_credits=0):
     """Enter the same run timing structure from a basic action or event."""
+    source_card_id = source_card_id or source_event_id
     state.run = RunState(server_id=server_id, source_event_id=source_event_id,
+                         source_card_id=source_card_id, source_ability_id=source_ability_id,
+                         source_location=state.card_instances[source_card_id].location.model_copy(deep=True) if source_card_id else None,
+                         successful_take_credits=successful_take_credits,
                          successful_draw=successful_draw, additional_accesses=additional_accesses,
                          bad_publicity_credits=state.corp.bad_publicity, phase="initiation")
+    state.turn.servers_run.add(state.run.server_id)
     ice = sorted((c for c in state.card_instances.values() if c.installed and c.location.server
                   and c.location.server.server_id == server_id
                   and c.location.server.area is ServerArea.ICE),
@@ -199,7 +301,7 @@ def resume_run(state, continuation, definitions):
         elif continuation == "approach":
             enter_movement(state, definitions)
         else:
-            begin_breach(state)
+            begin_success(state, definitions)
     elif continuation == "encounter":
         ice = state.card_instances[run.current_ice_id]
         if ice.rezzed:
@@ -213,11 +315,11 @@ def resume_run(state, continuation, definitions):
         definition = definitions[state.card_instances[run.current_ice_id].definition_id]
         for index, subroutine in enumerate(definition.subroutines or ()):
             if index not in run.broken_subroutine_indices and subroutine.type == "end_run":
-                end_run(state)
+                end_run(state, definitions)
                 return
         enter_movement(state, definitions)
     elif continuation == "breach":
-        begin_breach(state)
+        begin_success(state, definitions)
 
 
 def enter_movement(state, definitions):

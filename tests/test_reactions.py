@@ -98,6 +98,242 @@ class ReactionTests(unittest.TestCase):
             self.submit(self.state.window.player, {"type": "pass_priority"})
         self.fail("Paid window did not close")
 
+    def runner_identity(self, code):
+        identity = self.state.card_instances[self.state.runner.identity_card_instance_id]
+        identity.definition_id = code
+        self.state.runner.deck_selection.identity_definition_id = code
+
+    def run_to_breach(self, server, *, command=None):
+        self.submit(PlayerRole.RUNNER, command or {"type": "run_server", "server_id": server})
+        self.pass_paid()
+        self.submit(PlayerRole.RUNNER, {"type": "continue_run"})
+        self.pass_paid()
+
+    def finish_breach(self):
+        for _ in range(30):
+            if self.state.run is None or self.state.run.phase == "ended":
+                return
+            actions = self.view(PlayerRole.RUNNER)["legal_actions"]
+            action = next((a for a in actions if a["type"] in {"access_card", "finish_access"}), None)
+            self.assertIsNotNone(action, actions)
+            self.submit(PlayerRole.RUNNER, action)
+        self.fail("Breach did not finish")
+
+    def test_loup_trash_reaction_suspends_access_and_only_first_trash_pays(self):
+        self.runner_identity("30001")
+        first = self.add_card("30071", PlayerRole.CORP)  # Regolith
+        second = self.add_card("30071", PlayerRole.CORP)
+        self.turn(PlayerRole.RUNNER)
+        self.state.runner.credits = 20
+        for index, target in enumerate((first, second)):
+            self.run_to_breach(self.state.card_instances[target].location.server.server_id)
+            self.submit(PlayerRole.RUNNER, {"type": "access_card", "target": str(target)})
+            credits, hand = self.state.runner.credits, len(hand_cards(self.state, self.state.runner))
+            self.submit(PlayerRole.RUNNER, {"type": "finish_access", "trash": True})
+            self.assertEqual(self.state.runner.credits, credits - 3)
+            if index == 0:
+                self.assertEqual(self.state.run.phase, "access")
+                self.reject(PlayerRole.RUNNER, {"type": "finish_access"})
+                self.reject(PlayerRole.RUNNER, {"type": "pass_priority"})
+                self.submit(PlayerRole.RUNNER, self.reactions(PlayerRole.RUNNER)[0])
+            self.assertIsNone(self.state.run)
+            self.assertEqual(self.state.runner.credits, credits - 3 + (index == 0))
+            self.assertEqual(len(hand_cards(self.state, self.state.runner)), hand + (index == 0))
+            self.pass_paid()
+
+    def test_docklands_success_before_breach_and_bonus_stacks_with_jailbreak(self):
+        self.turn(PlayerRole.RUNNER)
+        self.add_card("30013", PlayerRole.RUNNER)
+        jailbreak = self.add_card("30028", PlayerRole.RUNNER, installed=False)
+        identity = self.state.card_instances[self.state.runner.identity_card_instance_id]
+        definition = self.cards[identity.definition_id]
+        self.cards[identity.definition_id] = definition.model_copy(update={"triggered_abilities": (
+            TriggeredAbility(ability_id="test_success", label="Success", trigger="run_success", optional=True,
+                             instructions=({"type": "gain_credits", "amount": 1},)),)})
+        self.run_to_breach("hq", command={"type": "play_card", "card_instance_id": str(jailbreak), "server_id": "hq"})
+        self.assertEqual(self.state.run.phase, "success")
+        self.assertEqual(self.state.run.access_limit, 1)
+        self.assertEqual(len(self.reactions(PlayerRole.RUNNER)), 2)
+        # Both success effects must complete before Docklands' breach trigger.
+        while self.state.run.phase == "success":
+            self.submit(PlayerRole.RUNNER, self.reactions(PlayerRole.RUNNER)[0])
+        self.assertEqual(self.state.run.phase, "breach")
+        self.assertEqual(self.state.run.access_limit, 2)
+        self.submit(PlayerRole.RUNNER, self.reactions(PlayerRole.RUNNER)[0])
+        self.assertEqual(self.state.run.access_limit, 3)
+        self.finish_breach()
+        self.pass_paid()
+        self.run_to_breach("hq")
+        self.submit(PlayerRole.RUNNER, {"type": "pass_priority"})  # optional success
+        self.assertEqual(self.state.run.access_limit, 1)
+        self.assertEqual(self.state.window, None)
+
+    def test_first_hq_breach_counts_before_docklands_is_installed(self):
+        self.turn(PlayerRole.RUNNER)
+        self.run_to_breach("hq")
+        self.finish_breach()
+        self.pass_paid()
+        card = self.add_card("30013", PlayerRole.RUNNER, installed=False)
+        self.submit(PlayerRole.RUNNER, {"type": "install_card", "card_instance_id": str(card)})
+        self.pass_paid()
+        self.run_to_breach("hq")
+        self.assertEqual(self.state.run.access_limit, 1)
+        self.assertIsNone(self.state.window)
+        self.finish_breach()
+        self.turn(PlayerRole.RUNNER)
+        self.run_to_breach("hq")
+        self.assertEqual(len(self.reactions(PlayerRole.RUNNER)), 1)
+
+    def test_zahya_decline_then_payout_keeps_run_context_until_cleanup(self):
+        self.runner_identity("30010")
+        self.turn(PlayerRole.RUNNER)
+        self.state.corp.bad_publicity = 2
+        self.run_to_breach("hq")
+        self.finish_breach()
+        self.assertEqual(self.state.run.phase, "ended")
+        self.assertEqual(self.state.run.bad_publicity_credits, 0)
+        first = self.reactions(PlayerRole.RUNNER)[0]
+        self.submit(PlayerRole.RUNNER, dict(first, decline=True))
+        self.assertIsNone(self.state.run)
+        self.pass_paid()
+        event = self.add_card(next(c.definition_id for c in self.cards.values() if c.title == "Jailbreak"), PlayerRole.RUNNER, installed=False)
+        self.run_to_breach("rd", command={"type": "play_card", "card_instance_id": str(event), "server_id": "rd"})
+        self.finish_breach()
+        reaction = self.state.window.reactions[0]
+        self.assertEqual(reaction.fact.access_count, 2)
+        self.assertEqual(reaction.fact.source_card_id, event)
+        self.assertEqual(self.state.card_instances[event].location.zone, CardZone.PLAY_AREA)
+        credits = self.state.runner.credits
+        self.reject(PlayerRole.RUNNER, {"type": "gain_credit"})
+        self.submit(PlayerRole.RUNNER, self.reactions(PlayerRole.RUNNER)[0])
+        self.assertEqual(self.state.runner.credits, credits + 2)
+        self.assertIsNone(self.state.run)
+        self.assertEqual(self.state.card_instances[event].location.zone, CardZone.DISCARD_PILE)
+        self.pass_paid()
+        self.run_to_breach("rd")
+        self.finish_breach()
+        self.assertIsNone(self.state.run)
+
+    def test_zahya_zero_access_does_not_consume_use_and_new_turn_resets(self):
+        self.runner_identity("30010")
+        self.turn(PlayerRole.RUNNER)
+        self.submit(PlayerRole.RUNNER, {"type": "run_server", "server_id": "hq"})
+        self.pass_paid()
+        self.submit(PlayerRole.RUNNER, {"type": "jack_out"})
+        self.submit(PlayerRole.RUNNER, self.reactions(PlayerRole.RUNNER)[0])
+        self.assertEqual(self.state.card_instances[self.state.runner.identity_card_instance_id].ability_last_used_turn, {})
+        self.pass_paid()
+        for _ in range(2):
+            self.run_to_breach("rd")
+            self.finish_breach()
+            credits = self.state.runner.credits
+            self.submit(PlayerRole.RUNNER, self.reactions(PlayerRole.RUNNER)[0])
+            self.assertEqual(self.state.runner.credits, credits + 1)
+            self.turn(PlayerRole.RUNNER)
+
+    def test_red_team_targets_include_failed_runs_and_final_payout_trashes_source(self):
+        self.turn(PlayerRole.RUNNER)
+        team = self.add_card("30018", PlayerRole.RUNNER, installed=False)
+        self.submit(PlayerRole.RUNNER, {"type": "install_card", "card_instance_id": str(team)})
+        self.assertEqual(self.state.card_instances[team].counters["credit"], 12)
+        self.pass_paid()
+        self.submit(PlayerRole.RUNNER, {"type": "run_server", "server_id": "hq"})
+        self.pass_paid()
+        self.submit(PlayerRole.RUNNER, {"type": "jack_out"})
+        self.pass_paid()
+        command = {"type": "use_card_ability", "card_instance_id": str(team), "ability_id": "run_central"}
+        actions = [a for a in self.view(PlayerRole.RUNNER)["legal_actions"] if a["type"] == "use_card_ability" and a["card_instance_id"] == str(team)]
+        self.assertEqual({a["server_id"] for a in actions}, {"rd", "archives"})
+        self.reject(PlayerRole.RUNNER, dict(command, server_id="hq"))
+        self.reject(PlayerRole.RUNNER, command)
+        self.state.card_instances[team].counters["credit"] = 3
+        credits = self.state.runner.credits
+        self.run_to_breach("rd", command=dict(command, server_id="rd"))
+        self.assertEqual(self.state.runner.credits, credits + 3)
+        self.assertFalse(self.state.card_instances[team].installed)
+        self.assertEqual(self.state.run.source_card_id, team)
+        self.assertEqual(self.state.run.source_ability_id, "run_central")
+        self.finish_breach()
+        self.assertIsNone(self.state.run)
+        self.turn(PlayerRole.RUNNER)
+        self.assertEqual(self.state.turn.servers_run, set())
+
+    def test_red_team_failed_ability_run_has_no_payout_and_event_runs_count(self):
+        self.turn(PlayerRole.RUNNER)
+        team = self.add_card("30018", PlayerRole.RUNNER, credits=12)
+        command = {"type": "use_card_ability", "card_instance_id": str(team), "ability_id": "run_central"}
+        credits = self.state.runner.credits
+        self.submit(PlayerRole.RUNNER, dict(command, server_id="hq"))
+        self.pass_paid()
+        self.submit(PlayerRole.RUNNER, {"type": "jack_out"})
+        self.assertEqual(self.state.runner.credits, credits)
+        self.assertEqual(self.state.card_instances[team].counters["credit"], 12)
+        self.pass_paid()
+        event = self.add_card("30028", PlayerRole.RUNNER, installed=False)
+        self.submit(PlayerRole.RUNNER, {"type": "play_card", "card_instance_id": str(event), "server_id": "rd"})
+        self.pass_paid()
+        self.submit(PlayerRole.RUNNER, {"type": "jack_out"})
+        self.pass_paid()
+        actions = [a for a in self.view(PlayerRole.RUNNER)["legal_actions"]
+                   if a["type"] == "use_card_ability" and a["card_instance_id"] == str(team)]
+        self.assertEqual({a["server_id"] for a in actions}, {"archives"})
+        remote = self.add_card("30071", PlayerRole.CORP)
+        self.reject(PlayerRole.RUNNER, dict(command, server_id=self.state.card_instances[remote].location.server.server_id))
+        self.turn(PlayerRole.RUNNER)
+        actions = [a for a in self.view(PlayerRole.RUNNER)["legal_actions"]
+                   if a["type"] == "use_card_ability" and a["card_instance_id"] == str(team)]
+        self.assertEqual({a["server_id"] for a in actions}, {"hq", "rd", "archives"})
+
+    def test_repeated_archives_accesses_are_occurrences_and_steals_are_retained(self):
+        target = self.add_card("30042", PlayerRole.CORP)  # Manegarm, then move to Archives root
+        self.state.card_instances[target].location.server.server_id = "archives"
+        self.state.servers.remove(1)
+        self.turn(PlayerRole.RUNNER)
+        self.state.runner.credits = 20
+        self.run_to_breach("archives")
+        self.submit(PlayerRole.RUNNER, {"type": "access_card", "target": str(target)})
+        self.submit(PlayerRole.RUNNER, {"type": "finish_access", "trash": True})
+        self.submit(PlayerRole.RUNNER, {"type": "access_card", "target": str(target)})
+        self.assertEqual(self.state.run.access_count, 2)
+        self.assertEqual(self.state.run.visible_card_ids, [target, target])
+        self.finish_breach()
+        self.pass_paid()
+        self.runner_identity("30010")
+        self.run_to_breach("rd")
+        self.submit(PlayerRole.RUNNER, {"type": "access_card", "target": "rd"})
+        accessed = self.state.card_instances[self.state.run.current_card_id]
+        # Keep the selected instance in place, author an agenda to exercise stealing.
+        accessed.definition_id = "30067"  # Offworld Office
+        self.submit(PlayerRole.RUNNER, {"type": "finish_access"})
+        self.assertEqual(self.state.window.reactions[0].fact.agendas_stolen, 1)
+
+    def test_run_end_snapshot_reconnects_without_revealing_rd_to_corp(self):
+        self.runner_identity("30010")
+        self.turn(PlayerRole.RUNNER)
+        top = min((c for c in self.state.card_instances.values()
+                   if c.location.zone is CardZone.DECK and c.owner_id == self.state.corp.player_id),
+                  key=lambda c: c.location.deck_position)
+        top.definition_id = "30075"  # Leave an operation in R&D, keeping its identity private.
+        self.run_to_breach("rd")
+        with self.client.websocket_connect(self.path + "/events", headers=self.headers[PlayerRole.RUNNER]) as runner:
+            with self.client.websocket_connect(self.path + "/events", headers=self.headers[PlayerRole.CORP]) as corp:
+                runner.receive_json()
+                corp.receive_json()
+                self.submit(PlayerRole.RUNNER, {"type": "access_card", "target": "rd"})
+                runner_access, corp_access = runner.receive_json(), corp.receive_json()
+                self.assertIsNotNone(runner_access["state"]["run"]["current_card"])
+                self.assertIsNone(corp_access["state"]["run"]["current_card"])
+                ended = self.submit(PlayerRole.RUNNER, {"type": "finish_access"})
+                runner_end, corp_end = runner.receive_json(), corp.receive_json()
+                self.assertEqual(ended, runner_end["state"])
+                self.assertEqual(runner_end["revision"], corp_end["revision"])
+                self.assertEqual(ended["run"]["access_count"], 1)
+                self.assertEqual(corp_end["state"]["run"]["accessed_cards"], [])
+        with self.client.websocket_connect(self.path + "/events", headers=self.headers[PlayerRole.RUNNER]) as reconnect:
+            self.assertEqual(reconnect.receive_json()["state"], ended)
+            self.submit(PlayerRole.RUNNER, self.reactions(PlayerRole.RUNNER)[0])
+            self.assertIsNone(reconnect.receive_json()["state"]["run"])
+
     def test_nico_order_nested_empty_draw_and_mandatory_draw(self):
         first = self.add_card("30037", PlayerRole.CORP, credits=3)
         second = self.add_card("30037", PlayerRole.CORP, credits=6)

@@ -5,7 +5,9 @@ helper as basic actions; no printed prose is interpreted at runtime.
 """
 
 from content.cards.models import (
+    AdditionalAccesses,
     DrawCards,
+    GainAccessCredits,
     GainCredits,
     LoadCredits,
     LoseClickIfAny,
@@ -21,12 +23,13 @@ from .models import (
     GameState,
     PlayerRole,
     PlayerState,
+    RuleFact,
     ZoneLocation,
 )
 
 
 def resolve_effect(state: GameState, player: PlayerState, instruction: PlayInstruction,
-                   source: CardInstance | None = None) -> None:
+                   source: CardInstance | None = None, fact: RuleFact | None = None) -> None:
     """Resolve one effect fully before the next instruction or turn transition."""
     if isinstance(instruction, TrashSource):
         if source is not None:
@@ -49,6 +52,10 @@ def resolve_effect(state: GameState, player: PlayerState, instruction: PlayInstr
             amount = min(hosted, instruction.amount)
             source.counters["credit"] = hosted - amount
             player.credits += amount
+    elif isinstance(instruction, GainAccessCredits):
+        player.credits += fact.access_count if fact else 0
+    elif isinstance(instruction, AdditionalAccesses):
+        state.run.access_limit += instruction.amount
     elif isinstance(instruction, GainCredits):
         player.credits += instruction.amount
     elif isinstance(instruction, DrawCards):

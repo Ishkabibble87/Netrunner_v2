@@ -12,6 +12,7 @@ from content.cards.models import (
     CardDefinition,
     CardSide,
     CardType,
+    InitiateRun,
 )
 
 from .commands import UseCardAbility
@@ -79,13 +80,31 @@ def validate_ability(state: GameState, player: PlayerState, command: UseCardAbil
         raise IllegalCommand("Not enough clicks to use this ability")
     if ability.once_per_turn and card.ability_last_used_turn.get(ability.ability_id) == state.turn.number:
         raise IllegalCommand("This ability has already been used this turn")
+    run = next((i for i in ability.instructions if isinstance(i, InitiateRun)), None)
+    if run:
+        from .runs import validate_run_target
+        if ability.instructions != (run,) or run.hosted_credits:
+            raise IllegalCommand("Supported installed run actions require a single run instruction without an event fund")
+        if player.role is not PlayerRole.RUNNER:
+            raise IllegalCommand("Only the Runner can initiate a run")
+        validate_run_target(state, run, command.server_id)
+    elif command.server_id is not None:
+        raise IllegalCommand("This ability does not choose a server")
     return card, definition, ability
 
 
 def use_ability(state: GameState, player: PlayerState, command: UseCardAbility,
                 definitions: Mapping[str, CardDefinition]) -> None:
-    """Pay once and transfer credits before checking automatic trashing."""
+    """Pay an action once, then resolve its effects or enter its run timing."""
     card, _, ability = validate_ability(state, player, command, definitions)
     player.clicks_remaining -= ability.click_cost
     card.ability_last_used_turn[ability.ability_id] = state.turn.number
-    resolve_sequence(state, definitions, player, card, ability)
+    run = next((i for i in ability.instructions if isinstance(i, InitiateRun)), None)
+    if run:
+        from .runs import start_run
+        start_run(state, command.server_id, definitions, source_card_id=card.instance_id,
+                  source_ability_id=ability.ability_id,
+                  successful_take_credits=run.successful_take_credits,
+                  successful_draw=run.successful_draw, additional_accesses=run.additional_accesses)
+    else:
+        resolve_sequence(state, definitions, player, card, ability)

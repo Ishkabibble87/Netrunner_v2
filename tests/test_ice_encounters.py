@@ -276,7 +276,7 @@ class IceEncounterTests(RunScenario):
         self.session.state.window.player = PlayerRole.CORP
         self.reject("corp", {"type": "rez_card", "card_instance_id": str(asset)})
         self.session.state.window.player = PlayerRole.RUNNER
-        self.assertIn(self.ability(breaker, "break_barrier", (0,)), self.view()["legal_actions"])
+        self.assertIn(dict(self.ability(breaker, "break_barrier", (0,)), server_id=None), self.view()["legal_actions"])
 
     def test_training_corp_rezzes_supported_ice_during_human_run(self):
         ice = self.install("Palisade", "hq")
