@@ -156,6 +156,8 @@ class ConditionalBreakerTests(ReactionScenario):
                 self.assertTrue(self.state.run.successful)
                 self.submit(PlayerRole.RUNNER, {"type": "access_card", "target": "hq"})
                 self.submit(PlayerRole.RUNNER, {"type": "finish_access"})
+                if self.state.window and self.state.window.player is PlayerRole.CORP:
+                    self.submit(PlayerRole.CORP, {"type": "pass_priority"})  # Decline Send a Message.
                 self.assertEqual(self.state.run.phase, "ended")
                 reactions = self.reactions(PlayerRole.RUNNER)
                 self.assertTrue(any(a["card_instance_id"] == str(mayfly) for a in reactions))

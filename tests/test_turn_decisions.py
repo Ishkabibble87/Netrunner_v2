@@ -67,7 +67,7 @@ class TurnDecisionTests(unittest.TestCase):
                 self.assertEqual(response.status_code, 200, response.text)
                 corp = corp_socket.receive_json()["state"]
                 runner = runner_socket.receive_json()["state"]
-                self.assertEqual(corp["turn"], {"number": 2, "active_player": "runner", "phase": "action"})
+                self.assertEqual(corp["turn"], {"number": 2, "active_player": "runner", "phase": "action", "cannot_score": False})
                 self.assertEqual(corp["legal_actions"], [])
                 self.assertEqual(len(runner["you"]["hand"]), 5)
                 self.assertEqual(runner["you"]["clicks_remaining"], 4)

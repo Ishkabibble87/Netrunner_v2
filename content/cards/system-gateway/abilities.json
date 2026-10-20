@@ -1112,7 +1112,10 @@
       {
         "type": "end_run"
       }
-    ]
+    ],
+    "advanceable": true,
+    "advancement_strength_threshold": 3,
+    "advancement_strength_bonus": 5
   },
   "30065": {
     "play_requirement": "tagged",
@@ -1586,6 +1589,110 @@
                 ]
               }
             ]
+          }
+        ]
+      }
+    ]
+  },
+  "30019": {
+    "triggered_abilities": [
+      {
+        "ability_id": "tao_score",
+        "label": "Swap 2 installed pieces of ice",
+        "trigger": "score",
+        "scope": "any",
+        "optional": true,
+        "instructions": [
+          {
+            "type": "select_cards",
+            "player": "runner",
+            "side": "corp",
+            "zone": "installed",
+            "card_types": [
+              "ice"
+            ],
+            "effect": "swap_ice",
+            "count": 2,
+            "optional": true
+          }
+        ]
+      },
+      {
+        "ability_id": "tao_steal",
+        "label": "Swap 2 installed pieces of ice",
+        "trigger": "steal",
+        "scope": "any",
+        "optional": true,
+        "instructions": [
+          {
+            "type": "select_cards",
+            "player": "runner",
+            "side": "corp",
+            "zone": "installed",
+            "card_types": [
+              "ice"
+            ],
+            "effect": "swap_ice",
+            "count": 2,
+            "optional": true
+          }
+        ]
+      }
+    ]
+  },
+  "30036": {
+    "score_instructions": [
+      {
+        "type": "gain_clicks",
+        "amount": 3
+      },
+      {
+        "type": "prevent_scoring"
+      }
+    ]
+  },
+  "30069": {
+    "score_instructions": [],
+    "triggered_abilities": [
+      {
+        "ability_id": "message_score",
+        "label": "Rez 1 installed ice ignoring all costs",
+        "trigger": "score",
+        "scope": "self",
+        "optional": true,
+        "instructions": [
+          {
+            "type": "select_cards",
+            "player": "corp",
+            "side": "corp",
+            "zone": "installed",
+            "card_types": [
+              "ice"
+            ],
+            "effect": "rez",
+            "ignore_costs": true,
+            "optional": true
+          }
+        ]
+      },
+      {
+        "ability_id": "message_steal",
+        "label": "Rez 1 installed ice ignoring all costs",
+        "trigger": "steal",
+        "scope": "self",
+        "optional": true,
+        "instructions": [
+          {
+            "type": "select_cards",
+            "player": "corp",
+            "side": "corp",
+            "zone": "installed",
+            "card_types": [
+              "ice"
+            ],
+            "effect": "rez",
+            "ignore_costs": true,
+            "optional": true
           }
         ]
       }

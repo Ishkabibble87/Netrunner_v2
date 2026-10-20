@@ -6,6 +6,32 @@ from uuid import UUID
 from .models import CardZone, GameState, ZoneLocation
 
 
+def swap_installed_ice(state, first, second):
+    """Exchange installed locations simultaneously, preserving hosts and counters (CR 8.8.3).
+
+    Pending run positions follow their new occupants. During an encounter the
+    Runner instead follows the encountered ice to its new location (CR 6.2.7d).
+    """
+    replacements = {first.instance_id: second.instance_id, second.instance_id: first.instance_id}
+    first.location, second.location = second.location, first.location
+    run = state.run
+    if run is None:
+        return
+    run.remaining_ice_ids = [replacements.get(i, i) for i in run.remaining_ice_ids]
+    if run.current_ice_id in replacements:
+        if run.phase == "approach":
+            run.current_ice_id = replacements[run.current_ice_id]
+        elif run.phase == "encounter":
+            encountered = state.card_instances[run.current_ice_id]
+            position = encountered.location.server
+            run.server_id = position.server_id
+            run.remaining_ice_ids = [c.instance_id for c in sorted(
+                (c for c in state.card_instances.values() if c.installed and c.location.server
+                 and c.location.server.area.value == "ice" and c.location.server.server_id == run.server_id
+                 and c.location.server.ice_distance_from_server < position.ice_distance_from_server),
+                key=lambda c: c.location.server.ice_distance_from_server, reverse=True)]
+
+
 def shuffle_into_deck(state, player_id, cards=(), *, rng=None):
     """Shuffle returned cards with the deck, maintaining contiguous positions."""
     deck = [c for c in state.card_instances.values()

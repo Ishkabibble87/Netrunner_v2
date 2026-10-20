@@ -52,7 +52,7 @@ from .installation import (
     validate_install,
 )
 from .installed_abilities import (
-    resolve_lifecycle,
+    rez_card,
     use_ability,
     validate_ability,
     validate_rez,
@@ -68,7 +68,7 @@ from .models import (
     TurnPhase,
     ZoneLocation,
 )
-from .modifiers import memory_limit, memory_used, rez_cost
+from .modifiers import memory_limit, memory_used
 from .priority import pass_priority
 from .reactions import (
     basic_draw_amount,
@@ -151,7 +151,7 @@ def legal_actions_for(
                 pass
             else:
                 actions.append(RezCard(card.instance_id))
-            if state.run is not None or state.turn.active_player is not PlayerRole.CORP or state.turn.phase not in {TurnPhase.DRAW, TurnPhase.ACTION}:
+            if state.run is not None or state.turn.cannot_score or state.turn.active_player is not PlayerRole.CORP or state.turn.phase not in {TurnPhase.DRAW, TurnPhase.ACTION}:
                 continue
             try:
                 _, definition = installed_agenda(state, player, card.instance_id, definitions)
@@ -354,13 +354,9 @@ def apply_command(
                 raise IllegalCommand("Resolve reactions before using paid abilities")
             use_paid_ability(result, actor, command, definitions)
         elif isinstance(command, RezCard):
-            card, definition = validate_rez(result, actor, command.card_instance_id, definitions)
-            actor.credits -= rez_cost(result, definition)
-            result.card_instances[card.instance_id] = card.model_copy(update={"face_up": True, "rezzed": True})
-            card = result.card_instances[card.instance_id]
-            resolve_lifecycle(result, actor, card, definitions, trigger="rez")
+            rez_card(result, actor, command.card_instance_id, definitions)
         elif isinstance(command, ScoreAgenda):
-            if (result.run is not None or result.window.kind != "paid" or result.turn.active_player is not PlayerRole.CORP
+            if (result.run is not None or result.turn.cannot_score or result.window.kind != "paid" or result.turn.active_player is not PlayerRole.CORP
                     or result.turn.phase not in {TurnPhase.DRAW, TurnPhase.ACTION}):
                 raise IllegalCommand("Score only during an eligible Corp paid ability window")
             card, definition = installed_agenda(result, actor, command.card_instance_id, definitions)

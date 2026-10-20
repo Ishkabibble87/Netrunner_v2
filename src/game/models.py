@@ -255,6 +255,7 @@ class TurnState(DomainModel):
     servers_run: set[ServerId] = Field(default_factory=set)
     successful_run: bool = False
     printed_agenda_points_scored: int = Field(default=0, ge=0)
+    cannot_score: bool = False
 
     @model_validator(mode="after")
     def runner_has_no_draw_phase(self) -> "TurnState":

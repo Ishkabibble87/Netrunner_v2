@@ -381,6 +381,8 @@ class GameScreen:
         def line(text: str = "", style: str = "") -> None:
             fragments.append((style, f"{text}\n"))
 
+        if (self.state.get("turn") or {}).get("cannot_score"):
+            line("Corp cannot score agendas for the remainder of this turn", "class:section")
         run = self.state.get("run")
         if run:
             phase = "Runner may jack out" if run["phase"] == "subroutine_choice" else run["phase"]
