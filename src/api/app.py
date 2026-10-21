@@ -19,7 +19,12 @@ from fastapi import (
 from fastapi.responses import JSONResponse
 
 from application.game_setup import GameSetupError, create_ai_game
-from application.sessions import SessionAccessDenied, SessionNotFound, SessionStore
+from application.sessions import (
+    GameSession,
+    SessionAccessDenied,
+    SessionNotFound,
+    SessionStore,
+)
 from content.cards.loader import load_nsg_card_definitions
 from content.cards.models import CardDefinition
 from content.decks.deck_importer import DeckImportError, parse_nrdb_deck
@@ -63,6 +68,13 @@ def create_app(
     sessions = session_store if session_store is not None else SessionStore()
     sockets: dict[UUID, WebSocket] = {}
     command_lock = asyncio.Lock()
+
+    def session_snapshot(session: GameSession, viewer_id: UUID) -> schemas.SessionSnapshot:
+        """Build the revisioned state snapshot visible to one session player."""
+        return schemas.SessionSnapshot(
+            revision=session.revision,
+            state=projections.game_view_from_state(session.state, viewer_id, definitions),
+        )
 
     async def cleanup_sessions() -> None:
         while True:
@@ -202,16 +214,10 @@ def create_app(
             for connection_id, viewer_id in list(session.connections.items()):
                 socket = sockets.get(connection_id)
                 if socket is not None:
-                    snapshot = schemas.SessionSnapshot(
-                        revision=session.revision,
-                        state=projections.game_view_from_state(session.state, viewer_id, definitions),
-                    )
+                    snapshot = session_snapshot(session, viewer_id)
                     with suppress(WebSocketDisconnect, RuntimeError, OSError):
                         await socket.send_json(snapshot.model_dump(mode="json"))
-            return schemas.SessionSnapshot(
-                revision=session.revision,
-                state=projections.game_view_from_state(session.state, player_id, definitions),
-            )
+            return session_snapshot(session, player_id)
 
     @api.websocket("/games/{game_id}/events")
     async def game_events(websocket: WebSocket, game_id: UUID) -> None:
@@ -227,10 +233,7 @@ def create_app(
             # The session may have expired or been left while accepting the socket.
             session, player_id, connection_id = sessions.connect(game_id, token)
             sockets[connection_id] = websocket
-            snapshot = schemas.SessionSnapshot(
-                revision=session.revision,
-                state=projections.game_view_from_state(session.state, player_id, definitions)
-            )
+            snapshot = session_snapshot(session, player_id)
             await websocket.send_json(snapshot.model_dump(mode="json"))
             # Uvicorn's websockets backend detects silent failures with protocol pings.
             # Decisions use HTTP; the socket delivers private state snapshots.
