@@ -9,6 +9,7 @@ what the API accepts and returns.
 """
 
 from collections.abc import Mapping
+from dataclasses import fields
 from typing import Annotated, Literal
 from uuid import UUID
 
@@ -270,116 +271,79 @@ PlayerCommandRequest = Annotated[
 LegalAction = PlayerCommandRequest | DiscardCardsAction | CardSelectionAction
 
 
+_COMMAND_ADAPTERS: dict[type, tuple[type[BaseModel], str]] = {
+    ChooseMulligan: (MulliganCommandRequest, "choose_mulligan"),
+    GainCredit: (GainCreditCommandRequest, "gain_credit"),
+    DrawCard: (DrawCardCommandRequest, "draw_card"),
+    RemoveTag: (RemoveTagCommandRequest, "remove_tag"),
+    PurgeVirusCounters: (PurgeVirusCountersCommandRequest, "purge_virus_counters"),
+    PlayCard: (PlayCardCommandRequest, "play_card"),
+    DiscardCards: (DiscardCardsCommandRequest, "discard_cards"),
+    TrashPrograms: (TrashProgramsCommandRequest, "trash_programs"),
+    InstallCard: (InstallCardCommandRequest, "install_card"),
+    AdvanceCard: (AdvanceCardCommandRequest, "advance_card"),
+    ScoreAgenda: (ScoreAgendaCommandRequest, "score_agenda"),
+    PassPriority: (PassPriorityCommandRequest, "pass_priority"),
+    ResolveReaction: (ResolveReactionCommandRequest, "resolve_reaction"),
+    RunServer: (RunServerCommandRequest, "run_server"),
+    ContinueRun: (ContinueRunCommandRequest, "continue_run"),
+    JackOut: (JackOutCommandRequest, "jack_out"),
+    AccessCard: (AccessCardCommandRequest, "access_card"),
+    FinishAccess: (FinishAccessCommandRequest, "finish_access"),
+    RezCard: (RezCardCommandRequest, "rez_card"),
+    UseCardAbility: (UseCardAbilityCommandRequest, "use_card_ability"),
+    ChooseEffectOption: (ChooseEffectOptionRequest, "choose_effect_option"),
+    SelectEffectCards: (SelectEffectCardsRequest, "select_effect_cards"),
+    TrashResource: (TrashResourceRequest, "trash_resource"),
+}
+_REQUEST_ADAPTERS = {
+    request_type: (command_type, api_type)
+    for command_type, (request_type, api_type) in _COMMAND_ADAPTERS.items()
+}
+
+
+def _command_values(command: object) -> dict[str, object]:
+    """Copy command fields into API-friendly values, normalizing tuples to lists."""
+    values = {}
+    for field in fields(command):
+        value = getattr(command, field.name)
+        values[field.name] = list(value) if isinstance(value, tuple) else value
+    return values
+
+
 def game_command_from_request(request: PlayerCommandRequest) -> GameCommand:
     """Translate a validated API command into the transport-independent game type."""
-    if isinstance(request, SelectEffectCardsRequest):
-        return SelectEffectCards(tuple(request.card_instance_ids))
-    if isinstance(request, ChooseEffectOptionRequest):
-        return ChooseEffectOption(request.option_id)
-    if isinstance(request, TrashResourceRequest):
-        return TrashResource(request.card_instance_id)
-    if isinstance(request, TrashProgramsCommandRequest):
-        return TrashPrograms(tuple(request.card_instance_ids))
-    if isinstance(request, RunServerCommandRequest):
-        return RunServer(request.server_id)
-    if isinstance(request, ContinueRunCommandRequest):
-        return ContinueRun()
-    if isinstance(request, JackOutCommandRequest):
-        return JackOut()
-    if isinstance(request, AccessCardCommandRequest):
-        return AccessCard(request.target)
-    if isinstance(request, FinishAccessCommandRequest):
-        return FinishAccess(request.trash)
-    if isinstance(request, PlayCardCommandRequest):
-        return PlayCard(request.card_instance_id, request.server_id)
-    if isinstance(request, InstallCardCommandRequest):
-        return InstallCard(request.card_instance_id, request.server_id, tuple(request.trash_card_instance_ids), request.host_card_instance_id)
-    if isinstance(request, RezCardCommandRequest):
-        return RezCard(request.card_instance_id)
-    if isinstance(request, UseCardAbilityCommandRequest):
-        return UseCardAbility(request.card_instance_id, request.ability_id, tuple(request.subroutine_indices), request.server_id)
-    if isinstance(request, AdvanceCardCommandRequest):
-        return AdvanceCard(request.card_instance_id)
-    if isinstance(request, ScoreAgendaCommandRequest):
-        return ScoreAgenda(request.card_instance_id)
-    if isinstance(request, PassPriorityCommandRequest):
-        return PassPriority()
-    if isinstance(request, ResolveReactionCommandRequest):
-        return ResolveReaction(request.card_instance_id, request.reaction_id, request.decline)
-    if isinstance(request, DiscardCardsCommandRequest):
-        return DiscardCards(tuple(request.card_instance_ids))
-    if isinstance(request, MulliganCommandRequest):
-        return ChooseMulligan(request.decision)
-    if isinstance(request, GainCreditCommandRequest):
-        return GainCredit()
-    if isinstance(request, DrawCardCommandRequest):
-        return DrawCard()
-    if isinstance(request, RemoveTagCommandRequest):
-        return RemoveTag()
-    if isinstance(request, PurgeVirusCountersCommandRequest):
-        return PurgeVirusCounters()
-    raise ValueError("Unsupported API command")
+    adapter = _REQUEST_ADAPTERS.get(type(request))
+    if adapter is None:
+        raise ValueError("Unsupported API command")
+    command_type, _ = adapter
+    values = request.model_dump(exclude={"type"})
+    values = {
+        name: tuple(value) if isinstance(value, list) else value
+        for name, value in values.items()
+    }
+    return command_type(**values)
 
 
 def command_request_from_game(command: GameCommand | DiscardSelection | CardSelection) -> LegalAction:
     """Project a domain command into the shape clients can submit and display."""
     if isinstance(command, CardSelection):
-        return CardSelectionAction(eligible_card_instance_ids=list(command.eligible_card_instance_ids),
-                                   required_count=command.required_count, optional=command.optional, up_to=command.up_to)
-    if isinstance(command, SelectEffectCards):
-        return SelectEffectCardsRequest(type="select_effect_cards", card_instance_ids=list(command.card_instance_ids))
-    if isinstance(command, ChooseEffectOption):
-        return ChooseEffectOptionRequest(type="choose_effect_option", option_id=command.option_id)
-    if isinstance(command, TrashResource):
-        return TrashResourceRequest(type="trash_resource", card_instance_id=command.card_instance_id)
-    if isinstance(command, RunServer):
-        return RunServerCommandRequest(type="run_server", server_id=command.server_id)
-    if isinstance(command, ContinueRun):
-        return ContinueRunCommandRequest(type="continue_run")
-    if isinstance(command, JackOut):
-        return JackOutCommandRequest(type="jack_out")
-    if isinstance(command, AccessCard):
-        return AccessCardCommandRequest(type="access_card", target=command.target)
-    if isinstance(command, FinishAccess):
-        return FinishAccessCommandRequest(type="finish_access", trash=command.trash)
-    if isinstance(command, TrashPrograms):
-        return TrashProgramsCommandRequest(type="trash_programs", card_instance_ids=list(command.card_instance_ids))
-    if isinstance(command, PlayCard):
-        return PlayCardCommandRequest(type="play_card", card_instance_id=command.card_instance_id, server_id=command.server_id)
-    if isinstance(command, InstallCard):
-        return InstallCardCommandRequest(type="install_card", card_instance_id=command.card_instance_id,
-            server_id=command.server_id, trash_card_instance_ids=list(command.trash_card_instance_ids),
-            host_card_instance_id=command.host_card_instance_id)
-    if isinstance(command, RezCard):
-        return RezCardCommandRequest(type="rez_card", card_instance_id=command.card_instance_id)
-    if isinstance(command, UseCardAbility):
-        return UseCardAbilityCommandRequest(type="use_card_ability", card_instance_id=command.card_instance_id,
-                                           ability_id=command.ability_id, subroutine_indices=list(command.subroutine_indices), server_id=command.server_id)
-    if isinstance(command, AdvanceCard):
-        return AdvanceCardCommandRequest(type="advance_card", card_instance_id=command.card_instance_id)
-    if isinstance(command, ScoreAgenda):
-        return ScoreAgendaCommandRequest(type="score_agenda", card_instance_id=command.card_instance_id)
-    if isinstance(command, PassPriority):
-        return PassPriorityCommandRequest(type="pass_priority")
-    if isinstance(command, ResolveReaction):
-        return ResolveReactionCommandRequest(type="resolve_reaction", card_instance_id=command.card_instance_id,
-            reaction_id=command.reaction_id, decline=command.decline)
+        return CardSelectionAction(
+            eligible_card_instance_ids=list(command.eligible_card_instance_ids),
+            required_count=command.required_count,
+            optional=command.optional,
+            up_to=command.up_to,
+        )
     if isinstance(command, DiscardSelection):
-        return DiscardCardsAction(eligible_card_instance_ids=list(command.eligible_card_instance_ids),
-                                 required_count=command.required_count)
-    if isinstance(command, DiscardCards):
-        return DiscardCardsCommandRequest(type="discard_cards", card_instance_ids=list(command.card_instance_ids))
-    if isinstance(command, ChooseMulligan):
-        return MulliganCommandRequest(type="choose_mulligan", decision=command.decision)
-    if isinstance(command, GainCredit):
-        return GainCreditCommandRequest(type="gain_credit")
-    if isinstance(command, DrawCard):
-        return DrawCardCommandRequest(type="draw_card")
-    if isinstance(command, RemoveTag):
-        return RemoveTagCommandRequest(type="remove_tag")
-    if isinstance(command, PurgeVirusCounters):
-        return PurgeVirusCountersCommandRequest(type="purge_virus_counters")
-    raise ValueError("Unsupported game command")
+        return DiscardCardsAction(
+            eligible_card_instance_ids=list(command.eligible_card_instance_ids),
+            required_count=command.required_count,
+        )
+    adapter = _COMMAND_ADAPTERS.get(type(command))
+    if adapter is None:
+        raise ValueError("Unsupported game command")
+    request_type, api_type = adapter
+    return request_type(type=api_type, **_command_values(command))
 
 
 class SetupView(ApiModel):
