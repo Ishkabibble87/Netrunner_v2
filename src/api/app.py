@@ -30,7 +30,7 @@ from content.opponents.models import OpponentProfile
 from game.models import DeckSelection
 from game.setup import IllegalCommand
 
-from . import schemas
+from . import command_adapters, projections, schemas
 
 
 def create_app(
@@ -154,7 +154,7 @@ def create_app(
         except GameSetupError as error:
             raise HTTPException(status_code=422, detail=str(error)) from error
         session = sessions.create(game_state, profile.profile_id, [request.player_id])
-        initial_state = schemas.InitialGameView.from_game_state(
+        initial_state = projections.game_view_from_state(
             session.state,
             request.player_id,
             api.state.card_definitions,
@@ -172,7 +172,7 @@ def create_app(
         token: Annotated[str, Depends(player_token)],
     ) -> schemas.InitialGameView:
         session, player_id = sessions.get(game_id, token)
-        return schemas.InitialGameView.from_game_state(session.state, player_id, definitions)
+        return projections.game_view_from_state(session.state, player_id, definitions)
 
     @api.post("/games/{game_id}/leave", status_code=status.HTTP_204_NO_CONTENT)
     async def leave_game(game_id: UUID, token: Annotated[str, Depends(player_token)]) -> None:
@@ -194,7 +194,7 @@ def create_app(
         async with command_lock:
             try:
                 session, player_id = sessions.submit(
-                    game_id, token, schemas.game_command_from_request(request),
+                    game_id, token, command_adapters.game_command_from_request(request),
                     card_definitions=definitions,
                 )
             except IllegalCommand as error:
@@ -204,13 +204,13 @@ def create_app(
                 if socket is not None:
                     snapshot = schemas.SessionSnapshot(
                         revision=session.revision,
-                        state=schemas.InitialGameView.from_game_state(session.state, viewer_id, definitions),
+                        state=projections.game_view_from_state(session.state, viewer_id, definitions),
                     )
                     with suppress(WebSocketDisconnect, RuntimeError, OSError):
                         await socket.send_json(snapshot.model_dump(mode="json"))
             return schemas.SessionSnapshot(
                 revision=session.revision,
-                state=schemas.InitialGameView.from_game_state(session.state, player_id, definitions),
+                state=projections.game_view_from_state(session.state, player_id, definitions),
             )
 
     @api.websocket("/games/{game_id}/events")
@@ -229,7 +229,7 @@ def create_app(
             sockets[connection_id] = websocket
             snapshot = schemas.SessionSnapshot(
                 revision=session.revision,
-                state=schemas.InitialGameView.from_game_state(session.state, player_id, definitions)
+                state=projections.game_view_from_state(session.state, player_id, definitions)
             )
             await websocket.send_json(snapshot.model_dump(mode="json"))
             # Uvicorn's websockets backend detects silent failures with protocol pings.
