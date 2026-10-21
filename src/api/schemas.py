@@ -19,34 +19,7 @@ from content.cards.models import CardDefinition, CardSide, CardType
 from content.decks.models import PreconstructedDeck
 from content.opponents.models import OpponentProfile
 from game.choices import card_selection, choice_options
-from game.commands import (
-    AccessCard,
-    AdvanceCard,
-    CardSelection,
-    ChooseEffectOption,
-    ChooseMulligan,
-    ContinueRun,
-    DiscardCards,
-    DiscardSelection,
-    DrawCard,
-    FinishAccess,
-    GainCredit,
-    GameCommand,
-    InstallCard,
-    JackOut,
-    PassPriority,
-    PlayCard,
-    PurgeVirusCounters,
-    RemoveTag,
-    ResolveReaction,
-    RezCard,
-    RunServer,
-    ScoreAgenda,
-    SelectEffectCards,
-    TrashPrograms,
-    TrashResource,
-    UseCardAbility,
-)
+from game import commands as cmd
 from game.engine import legal_actions_for, pending_decision
 from game.icebreakers import effective_strength, paid_ability_label
 from game.installation import agenda_points, installed_programs
@@ -272,29 +245,29 @@ LegalAction = PlayerCommandRequest | DiscardCardsAction | CardSelectionAction
 
 
 _COMMAND_ADAPTERS: dict[type, tuple[type[BaseModel], str]] = {
-    ChooseMulligan: (MulliganCommandRequest, "choose_mulligan"),
-    GainCredit: (GainCreditCommandRequest, "gain_credit"),
-    DrawCard: (DrawCardCommandRequest, "draw_card"),
-    RemoveTag: (RemoveTagCommandRequest, "remove_tag"),
-    PurgeVirusCounters: (PurgeVirusCountersCommandRequest, "purge_virus_counters"),
-    PlayCard: (PlayCardCommandRequest, "play_card"),
-    DiscardCards: (DiscardCardsCommandRequest, "discard_cards"),
-    TrashPrograms: (TrashProgramsCommandRequest, "trash_programs"),
-    InstallCard: (InstallCardCommandRequest, "install_card"),
-    AdvanceCard: (AdvanceCardCommandRequest, "advance_card"),
-    ScoreAgenda: (ScoreAgendaCommandRequest, "score_agenda"),
-    PassPriority: (PassPriorityCommandRequest, "pass_priority"),
-    ResolveReaction: (ResolveReactionCommandRequest, "resolve_reaction"),
-    RunServer: (RunServerCommandRequest, "run_server"),
-    ContinueRun: (ContinueRunCommandRequest, "continue_run"),
-    JackOut: (JackOutCommandRequest, "jack_out"),
-    AccessCard: (AccessCardCommandRequest, "access_card"),
-    FinishAccess: (FinishAccessCommandRequest, "finish_access"),
-    RezCard: (RezCardCommandRequest, "rez_card"),
-    UseCardAbility: (UseCardAbilityCommandRequest, "use_card_ability"),
-    ChooseEffectOption: (ChooseEffectOptionRequest, "choose_effect_option"),
-    SelectEffectCards: (SelectEffectCardsRequest, "select_effect_cards"),
-    TrashResource: (TrashResourceRequest, "trash_resource"),
+    cmd.ChooseMulligan: (MulliganCommandRequest, "choose_mulligan"),
+    cmd.GainCredit: (GainCreditCommandRequest, "gain_credit"),
+    cmd.DrawCard: (DrawCardCommandRequest, "draw_card"),
+    cmd.RemoveTag: (RemoveTagCommandRequest, "remove_tag"),
+    cmd.PurgeVirusCounters: (PurgeVirusCountersCommandRequest, "purge_virus_counters"),
+    cmd.PlayCard: (PlayCardCommandRequest, "play_card"),
+    cmd.DiscardCards: (DiscardCardsCommandRequest, "discard_cards"),
+    cmd.TrashPrograms: (TrashProgramsCommandRequest, "trash_programs"),
+    cmd.InstallCard: (InstallCardCommandRequest, "install_card"),
+    cmd.AdvanceCard: (AdvanceCardCommandRequest, "advance_card"),
+    cmd.ScoreAgenda: (ScoreAgendaCommandRequest, "score_agenda"),
+    cmd.PassPriority: (PassPriorityCommandRequest, "pass_priority"),
+    cmd.ResolveReaction: (ResolveReactionCommandRequest, "resolve_reaction"),
+    cmd.RunServer: (RunServerCommandRequest, "run_server"),
+    cmd.ContinueRun: (ContinueRunCommandRequest, "continue_run"),
+    cmd.JackOut: (JackOutCommandRequest, "jack_out"),
+    cmd.AccessCard: (AccessCardCommandRequest, "access_card"),
+    cmd.FinishAccess: (FinishAccessCommandRequest, "finish_access"),
+    cmd.RezCard: (RezCardCommandRequest, "rez_card"),
+    cmd.UseCardAbility: (UseCardAbilityCommandRequest, "use_card_ability"),
+    cmd.ChooseEffectOption: (ChooseEffectOptionRequest, "choose_effect_option"),
+    cmd.SelectEffectCards: (SelectEffectCardsRequest, "select_effect_cards"),
+    cmd.TrashResource: (TrashResourceRequest, "trash_resource"),
 }
 _REQUEST_ADAPTERS = {
     request_type: (command_type, api_type)
@@ -311,7 +284,7 @@ def _command_values(command: object) -> dict[str, object]:
     return values
 
 
-def game_command_from_request(request: PlayerCommandRequest) -> GameCommand:
+def game_command_from_request(request: PlayerCommandRequest) -> cmd.GameCommand:
     """Translate a validated API command into the transport-independent game type."""
     adapter = _REQUEST_ADAPTERS.get(type(request))
     if adapter is None:
@@ -325,16 +298,16 @@ def game_command_from_request(request: PlayerCommandRequest) -> GameCommand:
     return command_type(**values)
 
 
-def command_request_from_game(command: GameCommand | DiscardSelection | CardSelection) -> LegalAction:
+def command_request_from_game(command: cmd.GameCommand | cmd.DiscardSelection | cmd.CardSelection) -> LegalAction:
     """Project a domain command into the shape clients can submit and display."""
-    if isinstance(command, CardSelection):
+    if isinstance(command, cmd.CardSelection):
         return CardSelectionAction(
             eligible_card_instance_ids=list(command.eligible_card_instance_ids),
             required_count=command.required_count,
             optional=command.optional,
             up_to=command.up_to,
         )
-    if isinstance(command, DiscardSelection):
+    if isinstance(command, cmd.DiscardSelection):
         return DiscardCardsAction(
             eligible_card_instance_ids=list(command.eligible_card_instance_ids),
             required_count=command.required_count,
