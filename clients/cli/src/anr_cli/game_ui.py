@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import re
-from dataclasses import dataclass, field
-from html import unescape
 from typing import Any, Callable
 
 from prompt_toolkit.application import Application
@@ -22,26 +19,18 @@ from prompt_toolkit.layout.scrollable_pane import ScrollablePane
 from prompt_toolkit.styles import Style
 from prompt_toolkit.widgets import Frame
 
+from .action_menu import build_action_choices
+from .game_rendering import (
+    GameRenderer,
+    MenuChoice,
+    MenuLevel,
+    installed_details,
+    players_by_role,
+    server_label,
+)
 from .navigation import navigation_bindings
 from .session import SessionConnectionError
 from .terminal import get_terminal_input
-
-
-@dataclass
-class MenuChoice:
-    label: str
-    kind: str
-    value: Any = None
-
-
-@dataclass
-class MenuLevel:
-    title: str
-    kind: str
-    choices: list[MenuChoice] = field(default_factory=list)
-    selected: int = 0
-    data: Any = None
-
 
 class GameScreen:
     """Show private game snapshots and offer commands from the server's view."""
@@ -59,6 +48,7 @@ class GameScreen:
     ) -> None:
         self.state = state
         self.card_catalog = card_catalog
+        self.renderer = GameRenderer(card_catalog)
         self.connection_status = connection_status
         self.state_provider = state_provider
         self.submit_action = submit_action
@@ -98,154 +88,12 @@ class GameScreen:
         return self.levels[-1]
 
     def _root_choices(self) -> list[MenuChoice]:
-        choices: list[MenuChoice] = []
-        legal_actions = self.state.get("legal_actions")
-        if isinstance(legal_actions, list):
-            for action in legal_actions:
-                if not isinstance(action, dict):
-                    continue
-                action_type = action.get("type")
-                if action_type == "choose_mulligan" and self.submit_action is not None:
-                    decision = action.get("decision")
-                    if decision == "keep":
-                        choices.append(MenuChoice("Keep opening hand", "action", dict(action)))
-                    elif decision == "mulligan":
-                        choices.append(
-                            MenuChoice("Mulligan · shuffle and draw five", "action", dict(action))
-                        )
-                elif action_type in {"run_server", "continue_run", "jack_out", "access_card", "finish_access"} and self.submit_action is not None:
-                    run = self.state.get("run") or {}
-                    if action_type == "run_server":
-                        label = f"Run {self._server_label(action['server_id'])} · 1 click"
-                    elif action_type == "continue_run":
-                        label = "Continue resolving subroutines" if run.get("phase") == "subroutine_choice" else "Continue inward"
-                    elif action_type == "jack_out":
-                        label = "Jack out"
-                    elif action_type == "access_card":
-                        target = action["target"]
-                        known = run.get("accessed_cards", []) + self.opponent.get("discard_pile", [])
-                        known += [c["card"] for c in self.state.get("installed_cards", []) if c.get("card")]
-                        card = next((c for c in known if c["instance_id"] == target), None)
-                        if target == "hq":
-                            label = "Access a random card from HQ"
-                        elif target == "rd":
-                            label = "Access the top card of R&D"
-                        else:
-                            roots = [c for c in self.state.get("installed_cards", []) if c["instance_id"] == target]
-                            position = self._server_label(roots[0]["server_id"]) if roots else "Archives"
-                            root_cards = [c for c in self.state.get("installed_cards", [])
-                                          if roots and c["server_id"] == roots[0]["server_id"] and c["area"] == "root"]
-                            ordinal = next((i for i, c in enumerate(root_cards, 1) if c["instance_id"] == target), 1)
-                            title = card['title'] if card else f"facedown card {ordinal}"
-                            label = f"Access {title} in {position}"
-                    else:
-                        card = run.get("current_card") or {}
-                        if action.get("trash"):
-                            cost = self.card_catalog.get(card.get("definition_id"), {}).get("trash_cost", "?")
-                            label = f"Trash {card.get('title', 'card')} · {cost} credits"
-                        elif card.get("card_type") == "agenda" and not run.get("cannot_steal_or_trash"):
-                            label = f"Steal {card['title']}"
-                        else:
-                            label = "Leave card and finish access"
-                    choices.append(MenuChoice(label, "action", dict(action)))
-                elif action_type == "play_card" and self.submit_action is not None:
-                    card = next((c for c in self.hand if c["instance_id"] == action["card_instance_id"]), None)
-                    if card is not None:
-                        cost = self.card_catalog.get(card["definition_id"], {}).get("play_cost", "?")
-                        target = f" → {self._server_label(action['server_id'])}" if action.get("server_id") is not None else ""
-                        choices.append(MenuChoice(f"Play {card['title']}{target} · {cost} credits", "action", dict(action)))
-                elif action_type == "install_card" and self.submit_action is not None:
-                    card = next((c for c in self.hand + self.state.get("selection_cards", []) if c["instance_id"] == action["card_instance_id"]), None)
-                    if card:
-                        target = ("your rig" if action.get("server_id") is None else
-                                  "new remote" if action["server_id"] == "new_remote" else self._server_label(action["server_id"]))
-                        if action.get("host_card_instance_id"):
-                            target = self._host_label(action["host_card_instance_id"])
-                        trash_titles = [c["card"]["title"] for c in self.state.get("installed_cards", [])
-                                        if c["instance_id"] in action.get("trash_card_instance_ids", []) and c.get("card")]
-                        replacement = " · trash " + ", ".join(trash_titles) if trash_titles else ""
-                        cost = card.get("effective_install_cost")
-                        if cost is None:
-                            cost = self.card_catalog.get(card["definition_id"], {}).get("install_cost")
-                        suffix = f" · {cost} {'credit' if cost == 1 else 'credits'}" if action.get("server_id") is None else ""
-                        click = "" if self.state.get("effect_install") else " · 1 click"
-                        choices.append(MenuChoice(f"Install {card['title']} in {target}{replacement}{click}{suffix}", "action", dict(action)))
-                elif action_type in {"rez_card", "use_card_ability"} and self.submit_action is not None:
-                    card = next((c["card"] for c in self.state.get("installed_cards", [])
-                                 if c["instance_id"] == action["card_instance_id"] and c.get("card")), {})
-                    title = card.get("title", "card")
-                    if action_type == "rez_card":
-                        cost = card.get("effective_rez_cost")
-                        if cost is None:
-                            cost = self.card_catalog.get(card.get("definition_id"), {}).get("rez_cost", "?")
-                        label = f"Rez {title} · {cost} credits"
-                    else:
-                        ability = card.get("ability_labels", {}).get(action["ability_id"], action["ability_id"])
-                        suffix = "" if action["ability_id"] in card.get("paid_ability_ids", []) else " · 1 click"
-                        if action.get("server_id") is not None:
-                            suffix += f" → {self._server_label(action['server_id'])}"
-                        targets = action.get("subroutine_indices", [])
-                        if targets:
-                            suffix += " · subroutines " + ", ".join(str(i + 1) for i in targets)
-                        label = f"{title}: {ability}{suffix}"
-                    choices.append(MenuChoice(label, "action", dict(action)))
-                elif action_type == "choose_effect_option" and self.submit_action is not None:
-                    label = self.state.get("effect_options", {}).get(action["option_id"], action["option_id"])
-                    choices.append(MenuChoice(label, "action", dict(action)))
-                elif action_type == "trash_resource" and self.submit_action is not None:
-                    card = next((c["card"] for c in self.state.get("installed_cards", [])
-                                 if c["instance_id"] == action["card_instance_id"] and c.get("card")), {})
-                    choices.append(MenuChoice(f"Trash {card.get('title', 'resource')} · 1 click, 2 credits", "action", dict(action)))
-                elif action_type == "resolve_reaction" and self.submit_action is not None:
-                    reaction = next((r for r in self.state.get("reactions", [])
-                                     if r["reaction_id"] == action.get("reaction_id")), {})
-                    verb = "Decline" if action.get("decline") else "Resolve"
-                    choices.append(MenuChoice(f"{verb} {reaction.get('label', 'ability')}", "action", dict(action)))
-                elif action_type in {"advance_card", "score_agenda"} and self.submit_action is not None:
-                    installed = [c["card"] for c in self.state.get("installed_cards", []) if c.get("card")]
-                    scored = self.state.get("you", {}).get("score_area", [])
-                    card = next((c for c in installed + scored if c["instance_id"] == action["card_instance_id"]), {})
-                    verb = {"advance_card": "Advance", "score_agenda": "Score"}[action_type]
-                    suffix = " · 1 credit" if action_type == "advance_card" else ""
-                    choices.append(MenuChoice(f"{verb} {card.get('title', 'agenda')}{suffix}", "action", dict(action)))
-                elif action_type == "trash_programs" and self.submit_action is not None:
-                    titles = [c["card"]["title"] for c in self.state.get("installed_cards", [])
-                              if c["instance_id"] in action["card_instance_ids"] and c.get("card")]
-                    choices.append(MenuChoice("Trash " + ", ".join(titles) + " to free memory", "action", dict(action)))
-                elif action_type == "select_effect_cards" and self.submit_action is not None:
-                    if "card_instance_ids" in action:
-                        choices.append(MenuChoice("Decline installation", "action", dict(action)))
-                    else:
-                        prefix = "Choose up to" if action.get("up_to") else "Choose"
-                        choices.append(MenuChoice(f"{prefix} {action['required_count']} cards", "discard", action))
-                elif action_type == "discard_cards" and self.submit_action is not None:
-                    choices.append(MenuChoice(f"Discard {action['required_count']} cards", "discard", action))
-                elif self.submit_action is not None:
-                    label = {
-                        "pass_priority": "Pass priority",
-                        "gain_credit": "Gain 1 credit",
-                        "draw_card": "Draw cards · 1 click",
-                        "remove_tag": "Remove 1 tag · 2 credits",
-                        "purge_virus_counters": "Purge virus counters · 3 clicks",
-                    }.get(action_type)
-                    if label is not None:
-                        choices.append(MenuChoice(label, "action", dict(action)))
-        elif (
-            self.submit_action is not None
-            and self.state.get("setup", {}).get("pending_player") == self.viewer_role
-        ):
-            # Older snapshots in local tools may predate the legal_actions field.
-            choices.extend([
-                MenuChoice(
-                    "Keep opening hand", "action",
-                    {"type": "choose_mulligan", "decision": "keep"},
-                ),
-                MenuChoice(
-                    "Mulligan · shuffle and draw five", "action",
-                    {"type": "choose_mulligan", "decision": "mulligan"},
-                ),
-            ])
-        return choices + [
+        actions = build_action_choices(
+            self.state,
+            self.card_catalog,
+            submit_action_available=self.submit_action is not None,
+        )
+        return actions + [
             MenuChoice("History · read only", "history"),
             MenuChoice("Inspect cards · read only", "inspect"),
             MenuChoice("Leave game", "exit"),
@@ -363,6 +211,31 @@ class GameScreen:
             wrap_lines=True,
         )
 
+    def _set_render_context(self) -> None:
+        self.renderer.set_context(
+            self.state,
+            self.viewer_role,
+            self.levels,
+            self.connection_status,
+            self.command_error,
+        )
+
+    def _header_fragments(self) -> list[tuple[str, str]]:
+        self._set_render_context()
+        return self.renderer._header_fragments()
+
+    def _footer_fragments(self) -> list[tuple[str, str]]:
+        self._set_render_context()
+        return self.renderer._footer_fragments()
+
+    def _board_fragments(self, *, compact: bool) -> list[tuple[str, str]]:
+        self._set_render_context()
+        return self.renderer._board_fragments(compact=compact)
+
+    def _menu_fragments(self) -> list[tuple[str, str]]:
+        self._set_render_context()
+        return self.renderer._menu_fragments()
+
     def _scroll(self, amount: int) -> None:
         pane = (
             self.board_pane
@@ -374,360 +247,12 @@ class GameScreen:
         pane.vertical_scroll = max(0, pane.vertical_scroll + amount)
         self._invalidate()
 
-    def _header_fragments(self) -> list[tuple[str, str]]:
-        return [("class:header", "ANDROID: NETRUNNER")]
-
-    def _footer_fragments(self) -> list[tuple[str, str]]:
-        if self.level.kind == "card":
-            help_text = "↑/↓ Cards · Tab Panel · PgUp/PgDn Scroll · Esc Back · Q Quit"
-        else:
-            help_text = "↑/↓ Move · Tab Panel · PgUp/PgDn Scroll · Enter Open · Esc Back · Q Quit"
-        return [("class:footer", help_text)]
-
-    def _board_fragments(self, *, compact: bool) -> list[tuple[str, str]]:
-        fragments: list[tuple[str, str]] = []
-
-        def line(text: str = "", style: str = "") -> None:
-            fragments.append((style, f"{text}\n"))
-
-        if (self.state.get("turn") or {}).get("cannot_score"):
-            line("Corp cannot score agendas for the remainder of this turn", "class:section")
-        run = self.state.get("run")
-        if run:
-            phase = "Runner may jack out" if run["phase"] == "subroutine_choice" else run["phase"]
-            line(f"Run on {self._server_label(run['server_id'])} · {phase}", "class:section")
-            line(f"Run credits: {run.get('bad_publicity_credits', 0)} bad publicity · {run.get('event_credits', 0)} event")
-            line(f"Accesses: {run.get('access_count', 0)} · agendas stolen: {run.get('agendas_stolen', 0)}")
-            if run.get("source_card") and not run.get("source_event"):
-                line(f"Source: {run['source_card']['title']}")
-            if run.get("source_event"):
-                line(f"Event: {run['source_event']['title']}")
-            if run.get("server_id") in {"hq", "rd"}:
-                line(f"Central accesses: {run.get('central_accesses', 0)}/{run.get('central_access_limit', 1)}")
-            ice = run.get("current_ice")
-            if ice:
-                line(f"{ice['title']} · strength {ice['strength']}", "class:card-title")
-            elif run.get("current_ice_id"):
-                line("Approaching facedown ice")
-            for sub in run.get("subroutines", []):
-                line(f"{sub['index'] + 1}. {sub['label']} · {'broken' if sub['broken'] else 'unbroken'}")
-            for installed in self.state.get("installed_cards", []):
-                breaker = installed.get("card") or {}
-                if installed.get("area") == "rig" and breaker.get("strength") is not None:
-                    line(f"{breaker['title']} · strength {breaker['strength']}")
-            card = run.get("current_card")
-            if card:
-                line(f"Accessing {card['title']}", "class:card-title")
-                definition = self.card_catalog.get(card["definition_id"], {})
-                line(self._plain_text(definition.get("printed_text", "")))
-                line(run.get("access_note", ""), "class:muted")
-            line()
-        corp, runner = self._players_by_role()
-        corp_hand = self._hand_count_for_role(corp)
-        runner_hand = self._hand_count_for_role(runner)
-        corp_deck = int(corp.get("deck_count", 0))
-        corp_identity = corp.get("identity", {}).get("title", "Unknown identity")
-        runner_identity = runner.get("identity", {}).get("title", "Unknown identity")
-        corp_stats = (
-            f"{corp.get('credits', 0)} credits · {corp_hand} cards in HQ · "
-            f"{corp_deck} cards in R&D"
-        )
-        runner_stats = (
-            f"{runner.get('credits', 0)} credits · {runner_hand} cards in grip"
-        )
-        runner_stats += f" · {runner.get('memory_used', 0)}/{runner.get('memory_limit', 4)} MU"
-        corp_stats += f" · hand limit {corp.get('maximum_hand_size', 5)}"
-        runner_stats += f" · hand limit {runner.get('maximum_hand_size', 5)}"
-        if runner.get("tags", 0):
-            runner_stats += f" · {runner['tags']} tags"
-        if self.viewer_role == "corp":
-            corp_stats += f" · {corp.get('clicks_remaining', 0)} clicks"
-        if self.viewer_role == "runner":
-            runner_stats += f" · {runner.get('clicks_remaining', 0)} clicks"
-
-        for title, identity, stats in (
-            ("CORP", corp_identity, corp_stats),
-            ("RUNNER", runner_identity, runner_stats),
-        ):
-            line(f"{title} · {identity}" if compact else title, "class:section")
-            if not compact:
-                line(identity)
-            line(stats)
-            if not compact:
-                line()
-
-        for title, items in (
-            ("SERVERS", self._server_names()),
-            ("RIG", ["Programs", "Hardware", "Resources"]),
-            ("SCORE AREA", [f"{role}: {player.get('agenda_points', 0)} points · " +
-                            (", ".join(c["title"] for c in player.get("score_area", [])) or "no agendas scored")
-                            for role, player in (("Corp", corp), ("Runner", runner))]),
-        ):
-            if compact:
-                line(f"{title}: {' · '.join(items)}")
-            else:
-                line(title, "class:section")
-                for item in items:
-                    line(item)
-                line()
-        return fragments
-
-    def _menu_fragments(self) -> list[tuple[str, str]]:
-        fragments: list[tuple[str, str]] = []
-
-        def line(text: str = "", style: str = "") -> None:
-            fragments.append((style, f"{text}\n"))
-
-        line("STATUS", "class:section")
-        line(self._status_text())
-        if self.state.get("revealed_cards"):
-            line("Revealed: " + ", ".join(c["title"] for c in self.state["revealed_cards"]))
-        if self.state.get("removed_cards"):
-            line("Removed from game: " + ", ".join(c["title"] for c in self.state["removed_cards"]))
-        if self.connection_status is not None:
-            line(self.connection_status(), "class:muted")
-        line()
-        game_id = str(self.state.get("game_id", ""))
-        if game_id:
-            line("GAME ID · share to join", "class:section")
-            line(game_id)
-            line()
-
-        if self.level.kind == "history":
-            self._append_history(fragments)
-            return fragments
-
-        if self.level.kind == "card":
-            self._append_card_detail(fragments)
-            return fragments
-
-        line("ACTIONS", "class:section")
-        pending_player = self.state.get("setup", {}).get("pending_player")
-        if pending_player == self.viewer_role:
-            action_prompt = "Review your hand, then keep it or take one mulligan."
-        elif pending_player is not None:
-            action_prompt = f"Waiting for {str(pending_player).title()} to choose an opening hand."
-        elif (self.state.get("decision") or {}).get("type") == "trash_for_memory":
-            action_prompt = "The Runner must trash programs to fit available memory."
-        elif (self.state.get("decision") or {}).get("type") == "discard_to_hand_limit":
-            action_prompt = self._status_text()
-        elif (self.state.get("decision") or {}).get("player") not in (None, self.viewer_role):
-            action_prompt = f"Waiting for {self.state['decision']['player'].title()} to choose an action."
-        elif self.state.get("legal_actions"):
-            action_prompt = "Choose an available action, or inspect the board."
-        else:
-            action_prompt = "No actions are available now; you can still inspect the board."
-        line(action_prompt, "class:muted")
-        if self.command_error:
-            line(self.command_error)
-        line()
-        breadcrumb = self._breadcrumb()
-        if breadcrumb:
-            line(breadcrumb, "class:muted")
-        line(self.level.title.upper(), "class:section")
-        if self.level.kind == "server":
-            for card in self.state.get("installed_cards", []):
-                if card["server_id"] == self.level.data:
-                    title = card["card"]["title"] if card.get("card") else "Facedown card"
-                    line(f"{title} · {card['area']} · {card.get('counters', {}).get('advancement', 0)} advancement")
-                    if "credit" in card.get("counters", {}):
-                        line(f"  {card['counters']['credit']} hosted credits")
-            line()
-        elif self.level.kind == "rig":
-            line("Installed Runner cards · select a card to read its abilities")
-            line()
-        elif self.level.kind == "hand" and not self.hand:
-            line("Your hand is empty.", "class:muted")
-            line()
-
-        if not self.level.choices:
-            line("No choices here.", "class:muted")
-        for index, choice in enumerate(self.level.choices):
-            style = "class:selected [SetCursorPosition]" if index == self.level.selected else ""
-            marker = "> " if index == self.level.selected else "  "
-            line(f"{marker}{choice.label}", style)
-        return fragments
-
-    def _append_history(self, fragments: list[tuple[str, str]]) -> None:
-        """Render the API's private history in order, grouped by turn and action."""
-        entries = self.state.get("history", [])
-        if not entries:
-            fragments.append(("class:muted", "No history yet.\n"))
-            return
-        previous_turn = previous_group = None
-        depths: dict[str, int] = {}
-        roots = {entry["entry_id"]: entry for entry in entries}
-        for entry in entries:
-            turn = (entry.get("turn_number"), entry.get("turn_player"))
-            if turn != previous_turn:
-                label = f"Turn {turn[0]} · {str(turn[1]).title()}" if turn[0] else "Setup"
-                fragments.append(("class:section", f"\n{label}\n"))
-                previous_turn = turn
-            if entry["group_id"] != previous_group:
-                root = roots.get(entry["group_id"], entry)
-                label = root["detail"]["text"]
-                if root["detail"].get("title"):
-                    label = f"{root['detail']['title']}: {label}"
-                fragments.append(("class:section", f"\n{label}\n"))
-                previous_group = entry["group_id"]
-            depth = min(depths.get(entry.get("parent_id"), -1) + 1, 4)
-            depths[entry["entry_id"]] = depth
-            detail = entry["detail"]
-            title = f"{detail['title']}: " if detail.get("title") else ""
-            actor = f"{entry['actor'].title()} · " if entry.get("actor") and entry["kind"] == "command" else ""
-            style = "class:section" if entry["entry_id"] == entry["group_id"] else ""
-            fragments.append((style, f"{'  ' * depth}{entry['sequence']}. {actor}{title}{detail['text']}\n"))
-
-    def _append_card_detail(
-        self,
-        fragments: list[tuple[str, str]],
-    ) -> None:
-        level = self.level
-        cards = level.data["cards"]
-        index = level.data["index"]
-        card = cards[index]
-        details = self.card_catalog.get(str(card.get("definition_id", "")), {})
-
-        def line(text: str = "", style: str = "") -> None:
-            fragments.append((style, f"{text}\n"))
-
-        line(self._breadcrumb(), "class:muted")
-        line(f"CARD {index + 1} OF {len(cards)}", "class:section")
-        line(str(details.get("title", card.get("title", "Unknown card"))), "class:card-title")
-
-        side = details.get("side", "")
-        card_type = details.get("card_type", card.get("card_type", ""))
-        subtypes = details.get("subtypes", [])
-        type_line = " · ".join(
-            part.title()
-            for part in [side, card_type, *subtypes]
-            if isinstance(part, str) and part
-        )
-        if type_line:
-            line(type_line)
-
-        for field_name, label in (
-            ("play_cost", "Play cost"),
-            ("install_cost", "Install cost"),
-            ("rez_cost", "Rez cost"),
-            ("trash_cost", "Trash cost"),
-            ("advancement_requirement", "Advancement requirement"),
-            ("agenda_points", "Agenda points"),
-            ("strength", "Strength"),
-            ("memory_cost", "Memory cost"),
-            ("base_link", "Base link"),
-        ):
-            value = details.get(field_name)
-            if value is not None:
-                line(f"{label}: {value}")
-
-        printed_text = self._plain_text(details.get("printed_text", ""))
-        if printed_text:
-            line()
-            line("PRINTED TEXT", "class:section")
-            line(printed_text)
-        line()
-        line("IN THIS GAME", "class:section")
-        location = level.data.get("location")
-        if location:
-            line(str(location))
-        else:
-            line("In your grip" if self.viewer_role == "runner" else "In HQ")
-
-    def _players_by_role(self) -> tuple[dict[str, Any], dict[str, Any]]:
-        if self.you.get("role") == "corp":
-            return self.you, self.opponent
-        return self.opponent, self.you
-
-    def _hand_count_for_role(self, player: dict[str, Any]) -> int:
-        if player.get("role") == self.viewer_role:
-            return len(player.get("hand", []))
-        return int(player.get("hand_count", 0))
-
-    def _server_names(self) -> list[str]:
-        rows = []
-        for server in self.state.get("servers", []):
-            cards = [c for c in self.state.get("installed_cards", []) if c["server_id"] == server]
-            labels = []
-            for card in cards:
-                label = card["card"]["title"] if card.get("card") else "Facedown card"
-                label += f" ({card['area']})"
-                if card.get("counters", {}).get("advancement"):
-                    label += f" · {card['counters']['advancement']} advancement"
-                if "credit" in card.get("counters", {}):
-                    label += f" · {card['counters']['credit']} hosted credits"
-                if card.get("rezzed"):
-                    label += " · rezzed"
-                labels.append(label)
-            rows.append(self._server_label(server) + (": " + ", ".join(labels) if labels else ""))
-        rig = [c for c in self.state.get("installed_cards", []) if c.get("area") == "rig"]
-        for card in rig:
-            title = card["card"]["title"] if card.get("card") else "Facedown card"
-            owner = "Your" if card.get("controller_id") == self.you.get("player_id") else "Opponent's"
-            rows.append(f"{owner} rig: {title}{self._installed_details(card)}")
-        return rows
-
-    def _host_label(self, instance_id: str) -> str:
-        """Identify a host by its public position without revealing facedown ice."""
-        host = next(c for c in self.state.get("installed_cards", []) if c["instance_id"] == instance_id)
-        title = host["card"]["title"] if host.get("card") else "unrezzed ice"
-        return f"{title} at {self._server_label(host['server_id'])} · ice {host['ice_distance_from_server'] + 1}"
+    @staticmethod
+    def _server_label(server: Any) -> str:
+        return server_label(server)
 
     def _installed_details(self, card: dict[str, Any]) -> str:
-        details = "".join(f" · {amount} {kind} counters" for kind, amount in card.get("counters", {}).items())
-        if card.get("host_card_instance_id"):
-            details += f" · hosted on {self._host_label(card['host_card_instance_id'])}"
-        return details
-
-    def _status_text(self) -> str:
-        winner = self.state.get("winner")
-        if winner:
-            return f"{str(winner).title()} wins"
-        pending = self.state.get("setup", {}).get("pending_player")
-        if pending is not None:
-            if pending == self.viewer_role:
-                return "Choose your opening hand · one mulligan allowed"
-            return f"Waiting for {str(pending).title()} opening-hand choice"
-        if (self.state.get("run") or {}).get("phase") == "subroutine_choice":
-            return "Jack out or continue resolving subroutines" if self.viewer_role == "runner" else "Runner may jack out"
-        decision = self.state.get("decision") or {}
-        if decision.get("type") in {"choose_effect", "choose_cards"}:
-            who = "You" if decision["player"] == self.viewer_role else str(decision["player"]).title()
-            return f"{who}: " + ("choose cards" if decision["type"] == "choose_cards" else "choose an effect")
-        if decision.get("type") in {"paid_ability_window", "resolve_reaction"}:
-            who = "You" if decision["player"] == self.viewer_role else str(decision["player"]).title()
-            return f"{who}: " + ("paid ability window · act or pass" if decision["type"] == "paid_ability_window" else "resolve reaction")
-        if decision.get("type") == "discard_to_hand_limit":
-            who = "You" if decision["player"] == self.viewer_role else str(decision["player"]).title()
-            return f"{who} must discard {decision['cards_to_discard']} cards"
-        turn = self.state.get("turn") or {}
-        active = str(turn.get("active_player", "unknown"))
-        phase = str(turn.get("phase", "unknown")).replace("_", " ")
-        number = turn.get("number", "?")
-        if active == self.viewer_role:
-            return f"Your {phase} phase · turn {number}"
-        return f"Waiting on {active.title()} action · turn {number} · {phase} phase"
-
-    def _breadcrumb(self) -> str:
-        if len(self.levels) == 1:
-            return ""
-        labels = ["Inspect cards"]
-        for level in self.levels[1:]:
-            if level.kind == "servers":
-                labels.append("Servers")
-            elif level.kind == "server":
-                labels.append(str(level.data))
-            elif level.kind == "hand":
-                labels.append("Your hand")
-            elif level.kind == "card":
-                location = level.data.get("location")
-                if location:
-                    labels.append(str(location))
-                else:
-                    cards = level.data["cards"]
-                    card = cards[level.data["index"]]
-                    labels.append(str(card.get("title", "Card")))
-        return " / ".join(labels)
+        return installed_details(self.state, card)
 
     def _selection_card_label(self, card: dict[str, Any]) -> str:
         """Distinguish installed targets by their public location and counters."""
@@ -773,138 +298,176 @@ class GameScreen:
         if self.state_provider is not None:
             self.update_state(self.state_provider())
         level = self.level
-        if level.kind == "card":
-            return
-        if not level.choices:
+        if level.kind == "card" or not level.choices:
             return
         choice = level.choices[level.selected]
-        if choice.kind == "exit":
-            if self.app is not None:
-                self.app.exit()
-        elif choice.kind == "back":
-            self._back()
-        elif choice.kind == "action":
-            try:
-                if self.submit_action is None:
-                    return
-                state = self.submit_action(choice.value)
-            except (SessionConnectionError, ValueError, OSError) as error:
-                self.command_error = str(error)
-            else:
-                self.command_error = None
-                self.update_state(state)
-            self._invalidate()
-        elif choice.kind == "discard":
-            self._push(MenuLevel("Choose cards", "discard", data={
-                "action": choice.value, "selected": [],
-            }))
-            self._refresh_discard_choices()
-        elif choice.kind == "toggle_discard":
-            selected = self.level.data["selected"]
-            if choice.value in selected:
-                selected.remove(choice.value)
-            elif len(selected) < self.level.data["action"]["required_count"]:
-                selected.append(choice.value)
-            self._refresh_discard_choices()
-        elif choice.kind == "history":
-            self._push(MenuLevel("History", "history"))
-        elif choice.kind == "inspect":
-            corp, runner = self._players_by_role()
-            corp_identity = corp.get("identity", {})
-            runner_identity = runner.get("identity", {})
-            self._push(
-                MenuLevel(
-                    "Inspect cards",
-                    "inspect",
-                    [
-                        MenuChoice(
-                            f"Corp ID · {corp_identity.get('title', 'Unknown identity')}",
-                            "identity",
-                            {"player": "Corp", "card": corp_identity},
-                        ),
-                        MenuChoice(
-                            f"Runner ID · {runner_identity.get('title', 'Unknown identity')}",
-                            "identity",
-                            {"player": "Runner", "card": runner_identity},
-                        ),
-                        MenuChoice("Servers", "servers"),
-                        MenuChoice("Rig", "rig"),
-                        MenuChoice("Your hand", "hand"),
-                        MenuChoice("Back", "back"),
-                    ],
-                )
+        handlers: dict[str, Callable[[MenuChoice], None]] = {
+            "exit": self._exit_game,
+            "back": lambda _choice: self._back(),
+            "action": self._submit_action_choice,
+            "discard": self._begin_discard,
+            "toggle_discard": self._toggle_discard,
+            "history": self._open_history,
+            "inspect": self._open_inspector,
+            "identity": self._open_identity,
+            "rig": self._open_rig,
+            "installed_card": self._open_installed_card,
+            "servers": self._open_servers,
+            "server": self._open_server,
+            "hand": self._open_hand,
+            "card": self._open_card,
+        }
+        handler = handlers.get(choice.kind)
+        if handler is not None:
+            handler(choice)
+
+    def _exit_game(self, _choice: MenuChoice) -> None:
+        if self.app is not None:
+            self.app.exit()
+
+    def _submit_action_choice(self, choice: MenuChoice) -> None:
+        try:
+            if self.submit_action is None:
+                return
+            state = self.submit_action(choice.value)
+        except (SessionConnectionError, ValueError, OSError) as error:
+            self.command_error = str(error)
+        else:
+            self.command_error = None
+            self.update_state(state)
+        self._invalidate()
+
+    def _begin_discard(self, choice: MenuChoice) -> None:
+        self._push(
+            MenuLevel(
+                "Choose cards",
+                "discard",
+                data={"action": choice.value, "selected": []},
             )
-        elif choice.kind == "identity":
-            player = str(choice.value["player"])
-            self._push(
-                MenuLevel(
-                    f"{player} identity",
-                    "card",
-                    data={
-                        "cards": [choice.value["card"]],
-                        "index": 0,
-                        "location": f"{player} identity",
-                    },
-                )
+        )
+        self._refresh_discard_choices()
+
+    def _toggle_discard(self, choice: MenuChoice) -> None:
+        selected = self.level.data["selected"]
+        if choice.value in selected:
+            selected.remove(choice.value)
+        elif len(selected) < self.level.data["action"]["required_count"]:
+            selected.append(choice.value)
+        self._refresh_discard_choices()
+
+    def _open_history(self, _choice: MenuChoice) -> None:
+        self._push(MenuLevel("History", "history"))
+
+    def _open_inspector(self, _choice: MenuChoice) -> None:
+        corp, runner = players_by_role(self.you, self.opponent)
+        corp_identity = corp.get("identity", {})
+        runner_identity = runner.get("identity", {})
+        self._push(
+            MenuLevel(
+                "Inspect cards",
+                "inspect",
+                [
+                    MenuChoice(
+                        f"Corp ID · {corp_identity.get('title', 'Unknown identity')}",
+                        "identity",
+                        {"player": "Corp", "card": corp_identity},
+                    ),
+                    MenuChoice(
+                        f"Runner ID · {runner_identity.get('title', 'Unknown identity')}",
+                        "identity",
+                        {"player": "Runner", "card": runner_identity},
+                    ),
+                    MenuChoice("Servers", "servers"),
+                    MenuChoice("Rig", "rig"),
+                    MenuChoice("Your hand", "hand"),
+                    MenuChoice("Back", "back"),
+                ],
             )
-        elif choice.kind == "rig":
-            cards = [c for c in self.state.get("installed_cards", []) if c.get("area") == "rig" and c.get("card")]
-            self._push(
-                MenuLevel(
-                    "Rig",
-                    "rig",
-                    [MenuChoice(f"{c['card']['title']}{self._installed_details(c)}",
-                                "installed_card", c["card"]) for c in cards] + [MenuChoice("Back", "back")],
-                )
+        )
+
+    def _open_identity(self, choice: MenuChoice) -> None:
+        player = str(choice.value["player"])
+        self._push(
+            MenuLevel(
+                f"{player} identity",
+                "card",
+                data={
+                    "cards": [choice.value["card"]],
+                    "index": 0,
+                    "location": f"{player} identity",
+                },
             )
-        elif choice.kind == "installed_card":
-            self._push(MenuLevel("Card", "card", data={"cards": [choice.value], "index": 0, "location": "Runner rig"}))
-        elif choice.kind == "servers":
-            servers = self.state.get("servers", [])
-            self._push(
-                MenuLevel(
-                    "Servers",
-                    "servers",
-                    [
-                        MenuChoice(self._server_label(server), "server", server)
-                        for server in servers
-                    ]
-                    + [MenuChoice("Back", "back")],
-                )
+        )
+
+    def _open_rig(self, _choice: MenuChoice) -> None:
+        cards = [
+            card for card in self.state.get("installed_cards", [])
+            if card.get("area") == "rig" and card.get("card")
+        ]
+        choices = [
+            MenuChoice(
+                f"{card['card']['title']}{self._installed_details(card)}",
+                "installed_card",
+                card["card"],
             )
-        elif choice.kind == "server":
-            self._push(
-                MenuLevel(
-                    self._server_label(choice.value),
-                    "server",
-                    [MenuChoice("Back", "back")],
-                    data=choice.value,
-                )
+            for card in cards
+        ]
+        self._push(MenuLevel("Rig", "rig", choices + [MenuChoice("Back", "back")]))
+
+    def _open_installed_card(self, choice: MenuChoice) -> None:
+        self._push(
+            MenuLevel(
+                "Card",
+                "card",
+                data={
+                    "cards": [choice.value],
+                    "index": 0,
+                    "location": "Runner rig",
+                },
             )
-        elif choice.kind == "hand":
-            hand_choices = [
-                MenuChoice(
-                    f"{card.get('title', 'Unknown card')} · {str(card.get('card_type', '')).title()}",
-                    "card",
-                    index,
-                )
-                for index, card in enumerate(self.hand)
-            ]
-            self._push(
-                MenuLevel(
-                    "Your hand",
-                    "hand",
-                    hand_choices + [MenuChoice("Back", "back")],
-                )
+        )
+
+    def _open_servers(self, _choice: MenuChoice) -> None:
+        choices = [
+            MenuChoice(server_label(server), "server", server)
+            for server in self.state.get("servers", [])
+        ]
+        self._push(
+            MenuLevel("Servers", "servers", choices + [MenuChoice("Back", "back")])
+        )
+
+    def _open_server(self, choice: MenuChoice) -> None:
+        self._push(
+            MenuLevel(
+                server_label(choice.value),
+                "server",
+                [MenuChoice("Back", "back")],
+                data=choice.value,
             )
-        elif choice.kind == "card":
-            self._push(
-                MenuLevel(
-                    "Card",
-                    "card",
-                    data={"cards": self.hand, "index": int(choice.value)},
-                )
+        )
+
+    def _open_hand(self, _choice: MenuChoice) -> None:
+        choices = [
+            MenuChoice(
+                f"{card.get('title', 'Unknown card')} "
+                f"· {str(card.get('card_type', '')).title()}",
+                "card",
+                index,
             )
+            for index, card in enumerate(self.hand)
+        ]
+        self._push(
+            MenuLevel("Your hand", "hand", choices + [MenuChoice("Back", "back")])
+        )
+
+    def _open_card(self, choice: MenuChoice) -> None:
+        self._push(
+            MenuLevel(
+                "Card",
+                "card",
+                data={"cards": self.hand, "index": int(choice.value)},
+            )
+        )
 
     def _back(self) -> None:
         if len(self.levels) > 1:
@@ -929,23 +492,3 @@ class GameScreen:
     def _invalidate(self) -> None:
         if self.app is not None:
             self.app.invalidate()
-
-    @staticmethod
-    def _server_label(server: Any) -> str:
-        if isinstance(server, int):
-            return f"Remote {server}"
-        return {
-            "hq": "HQ",
-            "rd": "R&D",
-            "archives": "Archives",
-        }.get(str(server).lower(), str(server))
-
-    @staticmethod
-    def _plain_text(value: Any) -> str:
-        text = unescape(str(value or ""))
-        text = re.sub(r"<\s*br\s*/?>", "\n", text, flags=re.IGNORECASE)
-        text = re.sub(r"</\s*(p|li|div)\s*>", "\n", text, flags=re.IGNORECASE)
-        text = re.sub(r"<[^>]+>", "", text)
-        text = text.replace("[credit]", "credit").replace("[click]", "click")
-        text = text.replace("[mu]", "MU")
-        return text.strip()
