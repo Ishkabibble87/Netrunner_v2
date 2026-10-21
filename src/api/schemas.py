@@ -726,5 +726,4 @@ class CardCatalogEntry(ApiModel):
 
     @classmethod
     def from_definition(cls, definition: CardDefinition) -> "CardCatalogEntry":
-        return cls(**definition.model_dump(exclude={"play_requirement", "play_instructions", "score_instructions", "install_instructions",
-                                                   "rez_instructions", "action_abilities", "trash_when_empty", "paid_abilities", "subroutines", "advanceable", "remote_strength_bonus", "triggered_abilities", "first_basic_draw_amount", "install_on_ice", "memory_bonus", "hand_size_bonus", "first_program_discount", "successful_run_install_discount", "strength_per_icebreaker", "advancement_strength_threshold", "advancement_strength_bonus"}))
+        return cls(**definition.model_dump(include=set(cls.model_fields)))
