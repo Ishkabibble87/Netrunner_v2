@@ -55,14 +55,12 @@ class GameScreen:
         *,
         connection_status: Callable[[], str] | None = None,
         state_provider: Callable[[], dict[str, Any]] | None = None,
-        choose_opening_hand: Callable[[str], dict[str, Any]] | None = None,
         submit_action: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
     ) -> None:
         self.state = state
         self.card_catalog = card_catalog
         self.connection_status = connection_status
         self.state_provider = state_provider
-        self.choose_opening_hand = choose_opening_hand
         self.submit_action = submit_action
         self.command_error: str | None = None
         self.you = state.get("you", {})
@@ -107,13 +105,13 @@ class GameScreen:
                 if not isinstance(action, dict):
                     continue
                 action_type = action.get("type")
-                if action_type == "choose_mulligan" and self.choose_opening_hand is not None:
+                if action_type == "choose_mulligan" and self.submit_action is not None:
                     decision = action.get("decision")
                     if decision == "keep":
-                        choices.append(MenuChoice("Keep opening hand", "opening_hand", decision))
+                        choices.append(MenuChoice("Keep opening hand", "action", dict(action)))
                     elif decision == "mulligan":
                         choices.append(
-                            MenuChoice("Mulligan · shuffle and draw five", "opening_hand", decision)
+                            MenuChoice("Mulligan · shuffle and draw five", "action", dict(action))
                         )
                 elif action_type in {"run_server", "continue_run", "jack_out", "access_card", "finish_access"} and self.submit_action is not None:
                     run = self.state.get("run") or {}
@@ -233,13 +231,19 @@ class GameScreen:
                     if label is not None:
                         choices.append(MenuChoice(label, "action", dict(action)))
         elif (
-            self.choose_opening_hand is not None
+            self.submit_action is not None
             and self.state.get("setup", {}).get("pending_player") == self.viewer_role
         ):
             # Older snapshots in local tools may predate the legal_actions field.
             choices.extend([
-                MenuChoice("Keep opening hand", "opening_hand", "keep"),
-                MenuChoice("Mulligan · shuffle and draw five", "opening_hand", "mulligan"),
+                MenuChoice(
+                    "Keep opening hand", "action",
+                    {"type": "choose_mulligan", "decision": "keep"},
+                ),
+                MenuChoice(
+                    "Mulligan · shuffle and draw five", "action",
+                    {"type": "choose_mulligan", "decision": "mulligan"},
+                ),
             ])
         return choices + [
             MenuChoice("History · read only", "history"),
@@ -779,15 +783,6 @@ class GameScreen:
                 self.app.exit()
         elif choice.kind == "back":
             self._back()
-        elif choice.kind == "opening_hand":
-            try:
-                state = self.choose_opening_hand(str(choice.value))
-            except (SessionConnectionError, ValueError, OSError) as error:
-                self.command_error = str(error)
-            else:
-                self.command_error = None
-                self.update_state(state)
-            self._invalidate()
         elif choice.kind == "action":
             try:
                 if self.submit_action is None:
