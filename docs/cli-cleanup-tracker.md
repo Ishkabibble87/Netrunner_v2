@@ -1,6 +1,6 @@
 # CLI cleanup tracker
 
-Status: planned; no production refactoring has been implemented.
+Status: in progress; mulligan command-path cleanup is complete.
 Review date: 2026-10-21. Starting point: main at a92f2ad.
 
 Preserve behavior and existing contracts, including the game-history additions in the latest merge. Tests are excluded from this review; review and refactor them separately. Game-engine changes, new features, dependencies, and a broader architecture redesign are outside this work.
@@ -13,10 +13,11 @@ Focus on `clients/cli/src/anr_cli/`. Start with generic mulligan submission and 
 
 ## Work items
 
-- [ ] **Use the generic command path for opening-hand choices.**
+- [x] **Use the generic command path for opening-hand choices.**
   - Locations: `clients/cli/src/anr_cli/game_ui.py` (`_root_choices`, `_activate`, constructor), `clients/cli/src/anr_cli/main.py` (`play_ai`).
   - Represent mulligan choices as ordinary command actions. Remove the separate opening-hand callback and its duplicated submission, error handling, state update, and invalidation logic.
   - Complete when keeping and mulliganing both use the same submission flow as other actions. Inspect the existing fallback for snapshots without `legal_actions` before deciding whether to retain it; removing compatibility is a separate behavior decision.
+  - Completed in commit 85ee3dab14a2b3b48d536e98f14b3880cd75131f. Live flow: started API and CLI from the worktree; exercised mulligan and keep in separate terminal games. Retained compatibility for snapshots without legal_actions by submitting ordinary choose_mulligan actions. Net source reduction: 9 lines.
 
 - [ ] **Split the game screen and simplify menu dispatch.**
   - Location: `clients/cli/src/anr_cli/game_ui.py`, especially `GameScreen`, `_root_choices`, and `_activate`.
