@@ -7,64 +7,11 @@ from threading import Lock
 from time import monotonic
 from uuid import UUID, uuid4
 
+from application.training_opponent import advance_ai_decisions
 from content.cards.models import CardDefinition
-from game.commands import (
-    CardSelection,
-    ChooseEffectOption,
-    ChooseMulligan,
-    DiscardCards,
-    DiscardSelection,
-    GainCredit,
-    GameCommand,
-    PassPriority,
-    ResolveReaction,
-    RezCard,
-    SelectEffectCards,
-    TrashPrograms,
-)
-from game.engine import apply_command, legal_actions_for, pending_decision
-from game.models import GameState, MulliganDecision, PlayerRole
-
-
-def advance_ai_setup(state: GameState, ai_player_ids: set[UUID]) -> GameState:
-    """Resolve consecutive opening-hand prompts for scripted AI players.
-
-    Stop as soon as setup is complete or a human player must choose. The current
-    training opponent always keeps its hand; this helper does not choose for humans.
-    """
-    while state.setup.pending_player is not None:
-        player = state.corp if state.setup.pending_player is PlayerRole.CORP else state.runner
-        if player.player_id not in ai_player_ids:
-            break
-        state = apply_command(state, player.player_id, ChooseMulligan(MulliganDecision.KEEP))
-    return state
-
-
-def advance_ai_decisions(state: GameState, ai_player_ids: set[UUID], card_definitions=None) -> GameState:
-    """Run the training policy until a human decision or game end.
-
-    The opponent keeps its opening hand, gains credits, and discards the first
-    eligible excess cards. During a run the Corp rezzes affordable supported
-    cards. Every choice goes through the authoritative engine.
-    """
-    state = advance_ai_setup(state, ai_player_ids)
-    while state.winner is None and state.turn is not None:
-        role = pending_decision(state, card_definitions).player
-        player = state.corp if role is PlayerRole.CORP else state.runner
-        if player.player_id not in ai_player_ids:
-            break
-        actions = legal_actions_for(state, player.player_id, card_definitions)
-        if not actions:
-            break
-        selection = next((a for a in actions if isinstance(a, DiscardSelection)), None)
-        targets = next((a for a in actions if isinstance(a, CardSelection)), None)
-        command = (SelectEffectCards(targets.eligible_card_instance_ids[:targets.required_count]) if targets else
-                   DiscardCards(selection.eligible_card_instance_ids[:selection.required_count])
-                   if selection else next((a for a in actions if isinstance(a, (ChooseEffectOption, SelectEffectCards, TrashPrograms, ResolveReaction, PassPriority))), GainCredit()))
-        if state.run is not None:
-            command = next((a for a in actions if isinstance(a, RezCard)), command)
-        state = apply_command(state, player.player_id, command, card_definitions)
-    return state
+from game import commands as cmd
+from game.engine import apply_command
+from game.models import GameState
 
 
 class SessionNotFound(Exception):
@@ -182,7 +129,7 @@ class SessionStore:
             return self._authenticated(game_id, token)
 
     def submit(
-        self, game_id: UUID, token: str, command: GameCommand,
+        self, game_id: UUID, token: str, command: cmd.GameCommand,
         *, card_definitions: Mapping[str, CardDefinition] | None = None,
     ) -> tuple[GameSession, UUID]:
         """Apply an authenticated command and advance scripted opponent decisions.
