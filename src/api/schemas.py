@@ -53,6 +53,7 @@ from game.models import (
     CardZone,
     DeckSelection,
     GameState,
+    HistoryDetail,
     MulliganDecision,
     PlayerRole,
     PlayerState,
@@ -496,10 +497,26 @@ class ReactionView(ApiModel):
     optional: bool
 
 
+class HistoryView(ApiModel):
+    """A history occurrence containing only the authenticated viewer's details."""
+
+    entry_id: UUID
+    sequence: int
+    turn_number: int | None
+    turn_player: PlayerRole | None
+    group_id: UUID
+    parent_id: UUID | None
+    run_id: UUID | None
+    actor: PlayerRole | None
+    kind: str
+    detail: HistoryDetail
+
+
 class InitialGameView(ApiModel):
     """Current state projection with private cards and legal actions for one viewer."""
 
     game_id: UUID
+    history: list[HistoryView] = Field(default_factory=list)
     viewer_player_id: UUID
     viewer_role: PlayerRole
     setup: SetupView
@@ -604,6 +621,8 @@ class InitialGameView(ApiModel):
                            or state.card_instances[i].location.zone is not CardZone.DECK}
         decision = pending_decision(state, card_definitions)
         return cls(
+            history=[HistoryView(**entry.model_dump(exclude={"details"}), detail=entry.details[you.role])
+                     for entry in state.history if you.role in entry.details],
             revealed_cards=[card_view(i) for i in state.revealed_card_ids],
             removed_cards=[card_view(c.instance_id) for c in state.card_instances.values()
                            if c.location.zone is CardZone.REMOVED_FROM_GAME and c.face_up],

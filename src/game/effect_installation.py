@@ -71,7 +71,7 @@ def validate_effect_install(state, definitions, command):
 def open_install(state, instruction, source, fact, definitions, *, card_ids=None, fallback_hand=False):
     """Suspend the resolving ability until installation or an explicit decline."""
     state.suspended_windows.append(state.window)
-    state.window = PriorityWindow(kind="install", player=PlayerRole(instruction.player), selection=instruction,
+    state.window = PriorityWindow(history_parent_id=state.history_parent_id, kind="install", player=PlayerRole(instruction.player), selection=instruction,
         choice_source_id=source.instance_id if source else None, choice_fact=fact,
         install_card_ids=list(card_ids if card_ids is not None else selection_candidates(state, instruction, definitions)),
         install_fallback_hand=fallback_hand)

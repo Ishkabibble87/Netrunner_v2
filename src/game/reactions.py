@@ -18,6 +18,7 @@ from content.cards.models import (
 
 from .commands import ResolveReaction
 from .effects import resolve_effect
+from .history import boundary
 from .models import (
     CardInstance,
     CardZone,
@@ -63,6 +64,7 @@ def record_occurrence(state: GameState, key: str) -> int:
     return state.turn.occurrences[key]
 
 
+@boundary
 def collect_fact(state: GameState, definitions: Mapping[str, CardDefinition], fact: RuleFact) -> list[PendingReaction]:
     """Collect a fixed batch, including existing install, rez and score effects."""
     key = f"{fact.type}:{fact.player}"
@@ -142,13 +144,14 @@ def collect_turn_end(state: GameState, definitions: Mapping[str, CardDefinition]
     open_reactions(state, definitions, reactions)
 
 
+@boundary
 def open_reactions(state: GameState, definitions: Mapping[str, CardDefinition],
                    reactions: list[PendingReaction], *, auto_single: bool = False, cost_paid: bool = False) -> None:
     """Suspend the current window; only an unambiguous mandatory effect auto-runs."""
     if not reactions or state.winner is not None:
         return
     state.suspended_windows.append(state.window)
-    state.window = PriorityWindow(kind="reaction", player=state.turn.active_player,
+    state.window = PriorityWindow(history_parent_id=state.history_parent_id, kind="reaction", player=state.turn.active_player,
                                   reactions=reactions)
     if auto_single and len(reactions) == 1 and not reactions[0].optional:
         reaction = reactions[0]
@@ -242,12 +245,12 @@ def settle_reactions(state: GameState, definitions: Mapping[str, CardDefinition]
                 and c.face_up is False for c in state.card_instances.values()))
             if condition_met:
                 source = state.card_instances[reaction.card_instance_id] if source_present(state, reaction) else None
-                before = state.model_dump() if reaction.once_per_turn else None
+                before = state.model_dump(exclude={"history", "history_group_id", "history_parent_id"}) if reaction.once_per_turn else None
                 resolve_effect(state, player, instruction, source, reaction.fact,
                                set_aside_counters=reaction.set_aside_counters if reaction.set_aside_counters else None,
                                definitions=definitions)
                 if (reaction.once_per_turn and not isinstance(instruction, ChooseEffect)
-                        and before != state.model_dump() and source_present(state, reaction)):
+                        and before != state.model_dump(exclude={"history", "history_group_id", "history_parent_id"}) and source_present(state, reaction)):
                     state.card_instances[reaction.card_instance_id].ability_last_used_turn[reaction.ability_id] = state.turn.number
             checkpoint(state, definitions)
             continue
@@ -264,6 +267,7 @@ def settle_reactions(state: GameState, definitions: Mapping[str, CardDefinition]
         state.suspended_windows.clear()
 
 
+@boundary
 def resolve_reaction(state: GameState, definitions: Mapping[str, CardDefinition], command: ResolveReaction) -> None:
     """Resolve a unique pending instance or decline an optional instance."""
     window = state.window
@@ -300,6 +304,7 @@ def resolve_sequence(state: GameState, definitions: Mapping[str, CardDefinition]
     open_reactions(state, definitions, [reaction], auto_single=True)
 
 
+@boundary
 def resolve_instructions(state, definitions, player, card, instructions, ability_id, label,
                          *, fact=None, discard_after=False, cost_paid=False):
     """Resolve a mandatory sequence with checkpoints and an optional play cleanup."""

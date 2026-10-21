@@ -6,6 +6,7 @@ players without supported paid options pass automatically.
 """
 
 from .card_movement import draw_from_deck
+from .history import turn_step
 from .models import (
     CardZone,
     GameState,
@@ -40,6 +41,7 @@ def advance_turn(state: GameState, definitions=None) -> None:
                 return
         turn = state.turn
         player = state.corp if turn.active_player is PlayerRole.CORP else state.runner
+        turn_step(state, turn.step)
         if turn.step == "start":
             turn.step = "turn_begin"
             open_paid_window(state, definitions=definitions)  # CR 5.6.1b / 5.7.1b, before turn-begin steps.

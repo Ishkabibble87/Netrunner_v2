@@ -242,6 +242,7 @@ class GameScreen:
                 MenuChoice("Mulligan · shuffle and draw five", "opening_hand", "mulligan"),
             ])
         return choices + [
+            MenuChoice("History · read only", "history"),
             MenuChoice("Inspect cards · read only", "inspect"),
             MenuChoice("Leave game", "exit"),
         ]
@@ -250,13 +251,17 @@ class GameScreen:
         """Refresh the board and discard inspector references to the previous hand."""
         if state == self.state:
             return
+        viewing_history = bool(getattr(self, "levels", None) and self.level.kind == "history")
         self.state = state
         self.you = state.get("you", {})
         self.opponent = state.get("opponent", {})
         self.viewer_role = str(state.get("viewer_role", self.you.get("role", "")))
         self.hand = self.you.get("hand", [])
         self.levels = [MenuLevel("Game", "root", self._root_choices())]
-        self._reset_menu_scroll()
+        if viewing_history:
+            self.levels.append(MenuLevel("History", "history"))
+        else:
+            self._reset_menu_scroll()
         self._invalidate()
 
     def _refresh_state(self, app: Application) -> None:
@@ -484,6 +489,10 @@ class GameScreen:
             line(game_id)
             line()
 
+        if self.level.kind == "history":
+            self._append_history(fragments)
+            return fragments
+
         if self.level.kind == "card":
             self._append_card_detail(fragments)
             return fragments
@@ -534,6 +543,36 @@ class GameScreen:
             marker = "> " if index == self.level.selected else "  "
             line(f"{marker}{choice.label}", style)
         return fragments
+
+    def _append_history(self, fragments: list[tuple[str, str]]) -> None:
+        """Render the API's private history in order, grouped by turn and action."""
+        entries = self.state.get("history", [])
+        if not entries:
+            fragments.append(("class:muted", "No history yet.\n"))
+            return
+        previous_turn = previous_group = None
+        depths: dict[str, int] = {}
+        roots = {entry["entry_id"]: entry for entry in entries}
+        for entry in entries:
+            turn = (entry.get("turn_number"), entry.get("turn_player"))
+            if turn != previous_turn:
+                label = f"Turn {turn[0]} · {str(turn[1]).title()}" if turn[0] else "Setup"
+                fragments.append(("class:section", f"\n{label}\n"))
+                previous_turn = turn
+            if entry["group_id"] != previous_group:
+                root = roots.get(entry["group_id"], entry)
+                label = root["detail"]["text"]
+                if root["detail"].get("title"):
+                    label = f"{root['detail']['title']}: {label}"
+                fragments.append(("class:section", f"\n{label}\n"))
+                previous_group = entry["group_id"]
+            depth = min(depths.get(entry.get("parent_id"), -1) + 1, 4)
+            depths[entry["entry_id"]] = depth
+            detail = entry["detail"]
+            title = f"{detail['title']}: " if detail.get("title") else ""
+            actor = f"{entry['actor'].title()} · " if entry.get("actor") and entry["kind"] == "command" else ""
+            style = "class:section" if entry["entry_id"] == entry["group_id"] else ""
+            fragments.append((style, f"{'  ' * depth}{entry['sequence']}. {actor}{title}{detail['text']}\n"))
 
     def _append_card_detail(
         self,
@@ -772,6 +811,8 @@ class GameScreen:
             elif len(selected) < self.level.data["action"]["required_count"]:
                 selected.append(choice.value)
             self._refresh_discard_choices()
+        elif choice.kind == "history":
+            self._push(MenuLevel("History", "history"))
         elif choice.kind == "inspect":
             corp, runner = self._players_by_role()
             corp_identity = corp.get("identity", {})
@@ -886,7 +927,7 @@ class GameScreen:
 
     def _reset_menu_scroll(self) -> None:
         self.menu_pane.vertical_scroll = 0
-        self.follow_selection = self.level.kind != "card"
+        self.follow_selection = self.level.kind not in {"card", "history"}
         if self.app is not None:
             self.app.layout.focus(self.menu_window)
 

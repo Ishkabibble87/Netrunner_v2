@@ -21,6 +21,7 @@ from content.cards.models import (
 from .card_movement import trash_installed_card
 from .commands import AccessCard, ContinueRun, FinishAccess, JackOut, RunServer
 from .effects import resolve_effect
+from .history import boundary, note
 from .installation import agenda_points, remove_empty_remotes
 from .models import (
     CardZone,
@@ -108,6 +109,7 @@ def run_fact(state: GameState, kind: str, *, card_instance_id=None) -> RuleFact:
                     source_ability_id=run.source_ability_id)
 
 
+@boundary
 def cleanup_run(state: GameState) -> None:
     """Release context only after run-end reactions, then resume the initiating action."""
     source_event_id = state.run.source_event_id
@@ -120,6 +122,7 @@ def cleanup_run(state: GameState) -> None:
     remove_empty_remotes(state)
 
 
+@boundary
 def end_run(state: GameState, definitions: Mapping[str, CardDefinition]) -> None:
     """Expire run-only funds before run-end reactions (CR 6.9.6), retaining context."""
     run = state.run
@@ -175,6 +178,7 @@ def advance_run(state: GameState, definitions: Mapping[str, CardDefinition]) -> 
             cleanup_run(state)
 
 
+@boundary
 def resolve_run_command(state: GameState, command, definitions: Mapping[str, CardDefinition]) -> None:
     """Mutate a working snapshot after validation; the engine resumes the turn."""
     if isinstance(command, RunServer):
@@ -325,6 +329,7 @@ def begin_breach(state: GameState, definitions: Mapping[str, CardDefinition]) ->
     emit_fact(state, definitions, run_fact(state, "breach"))
 
 
+@boundary
 def start_run(state, server_id, definitions, *, source_event_id=None,
               successful_draw=0, additional_accesses=0, source_card_id=None,
               source_ability_id=None, successful_take_credits=0, additional_accesses_per_virus=False,
@@ -393,6 +398,7 @@ def enter_movement(state, definitions):
     run_window(state, "movement", definitions, rez_allowed=False)  # CR 6.9.4b.
 
 
+@boundary
 def resolve_subroutines(state, definitions):
     """Resolve unbroken subroutines, resuming after tag and jack-out decisions.
 
@@ -402,12 +408,16 @@ def resolve_subroutines(state, definitions):
     run = state.run
     ice = state.card_instances[run.current_ice_id]
     subroutines = definitions[ice.definition_id].subroutines or ()
+    history_parent = state.history_parent_id
     while run.next_subroutine < len(subroutines):
         index = run.next_subroutine
         run.next_subroutine += 1
         if index in run.broken_subroutine_indices:
             continue
         subroutine = subroutines[index]
+        object.__setattr__(state, "history_parent_id", history_parent)
+        object.__setattr__(state, "history_parent_id",
+                           note(state, "subroutine", subroutine.label, card_id=ice.instance_id) or history_parent)
         if subroutine.type == "end_run":
             end_run(state, definitions)
             return

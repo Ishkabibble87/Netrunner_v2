@@ -12,6 +12,7 @@ from content.cards.models import CardDefinition, CardSide, CardType
 
 from .card_movement import trash_installed_card
 from .commands import InstallCard
+from .history import boundary
 from .installed_abilities import resolve_lifecycle
 from .models import (
     CardInstance,
@@ -111,6 +112,7 @@ def validate_install(state: GameState, player: PlayerState, command: InstallCard
     return definition, cost
 
 
+@boundary
 def install_card(state: GameState, player: PlayerState, command: InstallCard,
                  definitions: Mapping[str, CardDefinition], *, effect=None, inward_source=None) -> None:
     """Install on a working copy, keeping a replacement's destination alive."""

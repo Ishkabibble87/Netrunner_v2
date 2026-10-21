@@ -32,6 +32,7 @@ from content.cards.models import (
 
 from .card_movement import draw_from_deck, trash_installed_card
 from .damage import deal_damage
+from .history import boundary
 from .models import (
     CardInstance,
     GameState,
@@ -41,6 +42,7 @@ from .models import (
 )
 
 
+@boundary
 def resolve_effect(state: GameState, player: PlayerState, instruction: PlayInstruction,
                    source: CardInstance | None = None, fact: RuleFact | None = None,
                    *, set_aside_counters: dict[str, int] | None = None,

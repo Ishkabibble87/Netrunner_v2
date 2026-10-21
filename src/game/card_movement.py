@@ -3,9 +3,11 @@
 from random import SystemRandom
 from uuid import UUID
 
+from .history import boundary
 from .models import CardZone, GameState, ZoneLocation
 
 
+@boundary
 def swap_installed_ice(state, first, second):
     """Exchange installed locations simultaneously, preserving hosts and counters (CR 8.8.3).
 
@@ -32,6 +34,7 @@ def swap_installed_ice(state, first, second):
                 key=lambda c: c.location.server.ice_distance_from_server, reverse=True)]
 
 
+@boundary
 def shuffle_into_deck(state, player_id, cards=(), *, rng=None):
     """Shuffle returned cards with the deck, maintaining contiguous positions."""
     deck = [c for c in state.card_instances.values()
@@ -52,6 +55,7 @@ def reindex_deck(state, player_id):
         card.location.deck_position = position
 
 
+@boundary
 def trash_installed_card(state, card, *, face_up=True):
     """Trash a source and its hosted descendants, clearing counters and locations."""
     if state.run:
@@ -77,6 +81,7 @@ def trash_installed_card(state, card, *, face_up=True):
     })
 
 
+@boundary
 def draw_from_deck(state: GameState, player_id: UUID, count: int) -> bool:
     """Move up to ``count`` top cards into a player's hand.
 

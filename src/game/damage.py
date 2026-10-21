@@ -7,9 +7,11 @@ No prevention or replacement window is needed by the currently supported cards.
 
 from random import SystemRandom
 
+from .history import boundary
 from .models import CardInstance, CardZone, GameState, PlayerRole, ZoneLocation
 
 
+@boundary
 def deal_damage(state: GameState, amount: int, damage_type: str) -> tuple[CardInstance, ...]:
     """Trash a random sample simultaneously, or end the game before further effects."""
     if amount < 0 or damage_type not in {"net", "meat"}:

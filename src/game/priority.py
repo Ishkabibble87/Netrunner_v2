@@ -35,7 +35,7 @@ def has_window_options(state: GameState, role: PlayerRole, definitions) -> bool:
 def open_paid_window(state: GameState, run_continuation=None, definitions=None,
                      *, rez_allowed: bool = True) -> None:
     """Open a window, automatically passing players with no supported options."""
-    state.window = PriorityWindow(kind="paid", player=state.turn.active_player,
+    state.window = PriorityWindow(history_parent_id=state.history_parent_id, kind="paid", player=state.turn.active_player,
                                   run_continuation=run_continuation, rez_allowed=rez_allowed)
     if not has_window_options(state, state.window.player, definitions or {}):
         pass_priority(state, definitions or {})
