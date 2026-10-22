@@ -86,6 +86,66 @@ class GameProgressTests(unittest.TestCase):
         self.advance_pharos(session)
         self.suffer_damage_and_flatline(session)
         self.inspect_game_history(session)
+        self.play_external_match()
+
+    def play_external_match(self):
+        """Continue through API multiplayer setup, private updates and safe retries."""
+        from fastapi.testclient import TestClient
+        from starlette.websockets import WebSocketDisconnect
+
+        from api.app import create_app
+
+        with TestClient(create_app(card_definitions=self.cards)) as api:
+            decks = api.get("/preconstructed-decks").json()
+            corp_deck = next(d["decklist"] for d in decks if d["role"] == "corp")
+            runner_deck = next(d["decklist"] for d in decks if d["role"] == "runner")
+            lobby = api.post("/lobbies", json={"decklist": corp_deck}).json()
+            code = lobby["join_code"]
+            host_headers = {"Authorization": f"Bearer {lobby['lobby_token']}"}
+            self.assertEqual(api.get(f"/lobbies/{code}").status_code, 401)
+            self.assertIsNone(api.get(f"/lobbies/{code}", headers=host_headers).json())
+            self.assertEqual(api.post(f"/lobbies/{code}/join", json={"decklist": corp_deck}).status_code, 422)
+            guest = api.post(f"/lobbies/{code}/join", json={"decklist": runner_deck}).json()
+            self.assertEqual(api.post(f"/lobbies/{code}/join", json={"decklist": runner_deck}).status_code, 409)
+            host = api.get(f"/lobbies/{code}", headers=host_headers).json()
+            game_id = host["initial_state"]["game_id"]
+            self.assertEqual(game_id, guest["initial_state"]["game_id"])
+            headers = {"Authorization": f"Bearer {host['player_token']}"}
+            guest_headers = {"Authorization": f"Bearer {guest['player_token']}"}
+            with api.websocket_connect(f"/games/{game_id}/events", headers=headers) as corp_socket:
+                with api.websocket_connect(f"/games/{game_id}/events", headers=guest_headers) as runner_socket:
+                    corp_initial = corp_socket.receive_json()
+                    runner_initial = runner_socket.receive_json()
+                    self.assertEqual(corp_initial["revision"], 0)
+                    for card in runner_initial["state"]["you"]["hand"]:
+                        self.assertNotIn(card["instance_id"], str(corp_initial))
+                    command = {"type": "choose_mulligan", "decision": "keep"}
+                    guarded = {**headers, "X-Expected-Revision": "0", "Idempotency-Key": str(uuid4())}
+                    first = api.post(f"/games/{game_id}/commands", json=command, headers=guarded)
+                    self.assertEqual(first.status_code, 200)
+                    self.assertEqual(first.json()["revision"], 1)
+                    self.assertEqual(corp_socket.receive_json()["revision"], 1)
+                    self.assertEqual(runner_socket.receive_json()["revision"], 1)
+                    retry = api.post(f"/games/{game_id}/commands", json=command, headers=guarded)
+                    self.assertEqual(retry.json()["revision"], 1)
+                    corp_socket.receive_json()
+                    runner_socket.receive_json()
+                    reused = api.post(f"/games/{game_id}/commands", json={"type": "gain_credit"}, headers=guarded)
+                    self.assertEqual(reused.status_code, 409)
+                    stale = api.post(f"/games/{game_id}/commands", json=command,
+                                     headers={**guest_headers, "X-Expected-Revision": "0"})
+                    self.assertEqual(stale.status_code, 409)
+                    result = api.post(f"/games/{game_id}/commands", json=command,
+                                      headers={**guest_headers, "X-Expected-Revision": "1"})
+                    self.assertEqual(result.status_code, 200)
+                    self.assertEqual(corp_socket.receive_json()["revision"], 2)
+                    self.assertEqual(runner_socket.receive_json()["revision"], 2)
+                    cancelled = api.post(f"/lobbies/{code}/leave", headers=host_headers)
+                    self.assertEqual(cancelled.status_code, 204)
+                    with self.assertRaises(WebSocketDisconnect):
+                        corp_socket.receive_json()
+                    self.assertEqual(api.get(f"/games/{game_id}/state", headers=headers).status_code, 403)
+                    self.assertEqual(api.get(f"/games/{game_id}/state", headers=guest_headers).status_code, 200)
 
     def inspect_game_history(self, session):
         """The same game's history spans mechanics without becoming rule state."""

@@ -67,6 +67,10 @@ def advance_ai_decisions(state: GameState, ai_player_ids: set[UUID], card_defini
     return state
 
 
+class StaleDecision(Exception):
+    """A decision was based on an old revision or reused a request ID."""
+
+
 class SessionNotFound(Exception):
     """The session does not exist or has expired."""
 
@@ -89,6 +93,7 @@ class GameSession:
     expires_at: float | None
     ai_player_ids: set[UUID] = field(default_factory=set)
     revision: int = 0
+    commands: dict[tuple[UUID, UUID], tuple[int | None, str]] = field(default_factory=dict)
     connections: dict[UUID, UUID] = field(default_factory=dict)
 
 
@@ -184,6 +189,7 @@ class SessionStore:
     def submit(
         self, game_id: UUID, token: str, command: GameCommand,
         *, card_definitions: Mapping[str, CardDefinition] | None = None,
+        expected_revision: int | None = None, command_id: UUID | None = None,
     ) -> tuple[GameSession, UUID]:
         """Apply an authenticated command and advance scripted opponent decisions.
 
@@ -193,9 +199,20 @@ class SessionStore:
         """
         with self._lock:
             session, player_id = self._authenticated(game_id, token)
+            key = (player_id, command_id)
+            fingerprint = (expected_revision, repr(command))
+            if command_id is not None and key in session.commands:
+                if session.commands[key] != fingerprint:
+                    raise StaleDecision("A command ID cannot be reused for another decision")
+                # Retries return the latest view without applying the command again.
+                return session, player_id
+            if expected_revision is not None and expected_revision != session.revision:
+                raise StaleDecision("State changed; observe the latest revision before acting")
             state = apply_command(session.state, player_id, command, card_definitions)
             session.state = advance_ai_decisions(state, session.ai_player_ids, card_definitions)
             session.revision += 1
+            if command_id is not None:
+                session.commands[key] = fingerprint
             return session, player_id
 
     def connect(self, game_id: UUID, token: str) -> tuple[GameSession, UUID, UUID]:
