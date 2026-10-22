@@ -210,15 +210,11 @@ def play_ai(api_url: str) -> None:
                 connection.accept_snapshot(snapshot)
                 return connection.latest_state
 
-            def choose_opening_hand(decision: str) -> dict[str, Any]:
-                return submit_action({"type": "choose_mulligan", "decision": decision})
-
             GameScreen(
                 connection.initial_state,
                 catalog_by_id,
                 connection_status=lambda: connection.status,
                 state_provider=lambda: connection.latest_state,
-                choose_opening_hand=choose_opening_hand,
                 submit_action=submit_action,
             ).run()
         if connection.error is not None:
