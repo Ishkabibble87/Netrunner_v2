@@ -2,8 +2,10 @@
 
 import json
 from pathlib import Path
+from time import sleep
 from typing import Any
 from urllib.error import HTTPError, URLError
+from urllib.parse import quote
 from urllib.request import Request, urlopen
 from uuid import uuid4
 
@@ -175,6 +177,46 @@ def play_ai(api_url: str) -> None:
         console.print(str(error), style="red")
         return
 
+    play_session(api_url, response, card_catalog)
+
+
+def play_external(api_url: str, *, hosting: bool) -> None:
+    """Host or join an external seat shared by human and agent clients."""
+    lobby = None
+    response = None
+    try:
+        decklist = select_deck(api_url)
+        if decklist is None:
+            return
+        if hosting:
+            lobby = request_json(api_url, "/lobbies", {"decklist": decklist})
+            console.print(f"Join code: [bold]{lobby['join_code']}[/bold]")
+            console.print("Waiting for another player. Ctrl+C cancels.")
+            while response is None:
+                response = request_json(api_url, f"/lobbies/{lobby['join_code']}",
+                                        player_token=lobby["lobby_token"])
+                if response is None:
+                    sleep(0.5)
+        else:
+            code = Prompt.ask("Join code (blank to cancel)").strip()
+            if not code:
+                return
+            response = request_json(api_url, f"/lobbies/{quote(code, safe='')}/join", {"decklist": decklist})
+        play_session(api_url, response, request_json(api_url, "/card-catalog"))
+    except KeyboardInterrupt:
+        console.print("Game connection cancelled.")
+    except (ApiError, OSError, UnicodeError, KeyError, TypeError) as error:
+        console.print(str(error), style="red")
+    finally:
+        if lobby is not None:
+            try:
+                request_json(api_url, f"/lobbies/{lobby['join_code']}/leave", {}, player_token=lobby["lobby_token"])
+            except ApiError:
+                pass
+
+
+def play_session(api_url: str, response: dict[str, Any], card_catalog: list[dict[str, Any]]) -> None:
+    """Run the same private game screen for scripted and external opponents."""
     initial_state = response.get("initial_state") if isinstance(response, dict) else None
     if (
         not isinstance(initial_state, dict)
@@ -239,7 +281,7 @@ def new_game_menu(api_url: str) -> None:
         if choice is None:
             return
         if choice == 0:
-            console.print("[yellow]Host Game is not implemented.[/yellow]")
+            play_external(api_url, hosting=True)
         elif choice == 1:
             play_ai(api_url)
         else:
@@ -256,7 +298,7 @@ def run_menu(api_url: str = typer.Option(DEFAULT_API_URL, envvar="ANR_API_URL"))
         if choice == 0:
             new_game_menu(api_url)
         elif choice == 1:
-            console.print("[yellow]Join Game is not implemented.[/yellow]")
+            play_external(api_url, hosting=False)
         else:
             return
 

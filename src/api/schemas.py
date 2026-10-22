@@ -74,6 +74,16 @@ class CreateGameRequest(ApiModel):
     opponent_profile_id: str = Field(min_length=1)
 
 
+class HostGameRequest(ApiModel):
+    decklist: DeckSelection
+
+
+class LobbyCreatedResponse(ApiModel):
+    join_code: str
+    lobby_token: str
+    expires_in_seconds: int = 600
+
+
 class DeckImportRequest(ApiModel):
     text: str
 

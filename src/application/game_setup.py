@@ -8,6 +8,7 @@ from content.opponents.models import OpponentProfile
 from game.deck_validation import (
     STARTER_ONLY_IDENTITY_TITLES,
     DeckValidationError,
+    validate_deck,
 )
 from game.models import DeckSelection, GameState, PlayerRole
 from game.setup import create_game_state
@@ -77,3 +78,49 @@ def create_ai_game(
         )
     except DeckValidationError as error:
         raise GameSetupError(str(error)) from error
+
+
+def validate_player_deck(
+    decklist: DeckSelection,
+    card_definitions: Mapping[str, CardDefinition],
+    starter_decks: Sequence[DeckSelection] = (),
+) -> tuple[PlayerRole, frozenset[str]]:
+    """Validate an external seat, allowing only exact supplied starter decklists."""
+
+    identity = card_definitions.get(decklist.identity_definition_id)
+    if identity is None:
+        raise GameSetupError("Unknown identity")
+    allowed = frozenset(
+        [identity.definition_id]
+        if identity.title in STARTER_ONLY_IDENTITY_TITLES and decklist in starter_decks
+        else []
+    )
+    role = PlayerRole(identity.side.value)
+    try:
+        validate_deck(decklist, role, card_definitions, allowed_starter_only_identity_ids=allowed)
+    except DeckValidationError as error:
+        raise GameSetupError(str(error)) from error
+    return role, allowed
+
+
+def create_player_game(
+    host_id: UUID, host_deck: DeckSelection,
+    guest_id: UUID, guest_deck: DeckSelection,
+    card_definitions: Mapping[str, CardDefinition],
+    starter_decks: Sequence[DeckSelection] = (),
+) -> GameState:
+    """Build a game with two externally controlled seats and opposite deck sides."""
+    host_role, host_allowed = validate_player_deck(host_deck, card_definitions, starter_decks)
+    guest_role, guest_allowed = validate_player_deck(guest_deck, card_definitions, starter_decks)
+    if host_role == guest_role:
+        raise GameSetupError("The other player must select the opposite side")
+    players = {host_role: (host_id, host_deck), guest_role: (guest_id, guest_deck)}
+    return create_game_state(
+        game_id=uuid4(),
+        corp_player_id=players[PlayerRole.CORP][0],
+        corp_deck=players[PlayerRole.CORP][1],
+        runner_player_id=players[PlayerRole.RUNNER][0],
+        runner_deck=players[PlayerRole.RUNNER][1],
+        card_definitions=card_definitions,
+        allowed_starter_only_identity_ids=host_allowed | guest_allowed,
+    )

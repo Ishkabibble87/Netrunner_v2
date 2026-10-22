@@ -1,0 +1,16 @@
+{
+  "name": "anr-agent-client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Compact player observations and tools for Pi and other Netrunner agents",
+  "engines": { "node": ">=22.19" },
+  "scripts": { "test": "node --test test/*.test.mjs", "test:live": "node --test test/live.mjs" },
+  "dependencies": { "ws": "^8.18.0" },
+  "peerDependencies": { "@earendil-works/pi-coding-agent": "^1.4.0", "@earendil-works/pi-ai": "^1.4.0" },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-coding-agent": { "optional": true },
+    "@earendil-works/pi-ai": { "optional": true }
+  },
+  "pi": { "extensions": ["./extension.ts"] }
+}
