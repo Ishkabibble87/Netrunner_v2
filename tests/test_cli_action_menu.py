@@ -5,11 +5,16 @@ import unittest
 from clients.cli.src.anr_cli.action_menu import build_action_choices
 
 
-class InstallIceMenuTests(unittest.TestCase):
-    def test_ice_is_grouped_by_instance_then_authorized_destination(self):
+class InstallMenuTests(unittest.TestCase):
+    def test_installs_are_grouped_by_type_instance_and_authorized_destination(self):
+        for card_type, title in (("ice", "Karunā"), ("upgrade", "Manegarm Skunkworks")):
+            with self.subTest(card_type=card_type):
+                self.assert_grouped_installs(card_type, title)
+
+    def assert_grouped_installs(self, card_type, title):
         hand = [
-            {"instance_id": "ice-1", "definition_id": "ice", "title": "Karunā", "card_type": "ice"},
-            {"instance_id": "ice-2", "definition_id": "ice", "title": "Karunā", "card_type": "ice"},
+            {"instance_id": "ice-1", "definition_id": "card", "title": title, "card_type": card_type},
+            {"instance_id": "ice-2", "definition_id": "card", "title": title, "card_type": card_type},
             {"instance_id": "asset", "definition_id": "asset", "title": "Nico Campaign", "card_type": "asset"},
         ]
         actions = [
@@ -22,10 +27,10 @@ class InstallIceMenuTests(unittest.TestCase):
         state = {"you": {"hand": hand}, "legal_actions": [actions[0], asset_action, *actions[1:]]}
         choices = build_action_choices(state, {}, submit_action_available=True)
         self.assertEqual(len(choices), 2)
-        self.assertEqual(choices[0].label, "Install ice")
+        self.assertEqual(choices[0].label, f"Install {card_type}")
         self.assertEqual(choices[1].value, asset_action)
         cards = choices[0].value.choices
-        self.assertEqual([card.label for card in cards], ["Karunā", "Karunā"])
+        self.assertEqual([card.label for card in cards], [title, title])
         targets = [choice for card in cards for choice in card.value.choices]
         self.assertEqual([target.value for target in targets], actions)
         self.assertEqual([target.label for target in targets], [
@@ -34,8 +39,23 @@ class InstallIceMenuTests(unittest.TestCase):
         self.assertTrue(all(target.kind == "action" for target in targets))
         self.assertEqual(build_action_choices(state, {}, submit_action_available=False), [])
 
-    def test_no_install_ice_menu_without_legal_ice_installs(self):
+    def test_no_install_menu_without_legal_installs(self):
         state = {"you": {"hand": [{"instance_id": "ice", "card_type": "ice"}]},
                  "legal_actions": [{"type": "gain_credit"}]}
         choices = build_action_choices(state, {}, submit_action_available=True)
         self.assertEqual([choice.label for choice in choices], ["Gain 1 credit"])
+
+    def test_ice_and_upgrades_have_separate_menus(self):
+        hand = [
+            {"instance_id": kind, "definition_id": kind, "title": kind, "card_type": kind}
+            for kind in ("ice", "upgrade")
+        ]
+        actions = [
+            {"type": "install_card", "card_instance_id": kind, "server_id": "hq"}
+            for kind in ("ice", "upgrade")
+        ]
+        choices = build_action_choices({"you": {"hand": hand}, "legal_actions": actions}, {},
+                                       submit_action_available=True)
+        self.assertEqual([choice.label for choice in choices], ["Install ice", "Install upgrade"])
+        for choice, action in zip(choices, actions):
+            self.assertEqual(choice.value.choices[0].value.choices[0].value, action)

@@ -308,7 +308,7 @@ def build_action_choices(
     *,
     submit_action_available: bool,
 ) -> list[MenuChoice]:
-    """Format legal actions, grouping ICE by copy and destination for navigation."""
+    """Format legal actions, grouping ICE and upgrades by copy and destination."""
     if not submit_action_available:
         return []
 
@@ -329,8 +329,8 @@ def build_action_choices(
             )
         )
 
-    ice_menu = MenuLevel("Install ice", "actions")
-    ice_cards: dict[str, MenuLevel] = {}
+    install_menus: dict[str, MenuLevel] = {}
+    install_cards: dict[str, MenuLevel] = {}
     install_candidates = [*state.get("you", {}).get("hand", []), *state.get("selection_cards", [])]
     for action in actions:
         action_type = action.get("type")
@@ -341,17 +341,20 @@ def build_action_choices(
                 find_card(install_candidates, action.get("card_instance_id"))
                 if action_type == "install_card" else None
             )
-            if card and card.get("card_type") == "ice" and formatted:
-                if not ice_cards:
-                    choices.append(MenuChoice("Install ice", "submenu", ice_menu))
+            if card and card.get("card_type") in {"ice", "upgrade"} and formatted:
+                card_type = card["card_type"]
+                if card_type not in install_menus:
+                    menu = MenuLevel(f"Install {card_type}", "actions")
+                    install_menus[card_type] = menu
+                    choices.append(MenuChoice(menu.title, "submenu", menu))
                 instance_id = card["instance_id"]
-                if instance_id not in ice_cards:
+                if instance_id not in install_cards:
                     card_menu = MenuLevel(f"Install {card['title']}", "actions")
-                    ice_cards[instance_id] = card_menu
-                    ice_menu.choices.append(MenuChoice(card["title"], "submenu", card_menu))
+                    install_cards[instance_id] = card_menu
+                    install_menus[card_type].choices.append(MenuChoice(card["title"], "submenu", card_menu))
                 for choice in formatted:
                     choice.label = choice.label.removeprefix(f"Install {card['title']} in ")
-                    ice_cards[instance_id].choices.append(choice)
+                    install_cards[instance_id].choices.append(choice)
             else:
                 choices.extend(formatted)
         elif action_type in _SIMPLE_ACTION_LABELS:
