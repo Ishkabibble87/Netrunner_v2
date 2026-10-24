@@ -79,7 +79,7 @@ class EndTurnMenuTests(unittest.TestCase):
                     state = {
                         "viewer_role": role,
                         "you": {"role": role, "clicks_remaining": clicks},
-                        "turn": {"phase": phase, "active_player": active},
+                        "turn": {"number": 1, "phase": phase, "active_player": active},
                         "decision": {"type": decision, "player": role},
                         "run": run,
                         "legal_actions": [action],

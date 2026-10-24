@@ -149,6 +149,10 @@ class GameRenderer:
         def line(text: str = "", style: str = "") -> None:
             fragments.append((style, f"{text}\n"))
 
+        if self.state.get("turn"):
+            line(self._turn_text(), "class:section")
+            line()
+
         if self.state.get("setup", {}).get("pending_player") is not None:
             line("YOUR OPENING HAND", "class:section")
             for card in self.hand:
@@ -205,10 +209,8 @@ class GameRenderer:
         runner_stats += f" · hand limit {runner.get('maximum_hand_size', 5)}"
         if runner.get("tags", 0):
             runner_stats += f" · {runner['tags']} tags"
-        if self.viewer_role == "corp":
-            corp_stats += f" · {corp.get('clicks_remaining', 0)} clicks"
-        if self.viewer_role == "runner":
-            runner_stats += f" · {runner.get('clicks_remaining', 0)} clicks"
+        corp_stats += f" · {corp.get('clicks_remaining', 0)} clicks"
+        runner_stats += f" · {runner.get('clicks_remaining', 0)} clicks"
 
         for title, identity, stats in (
             ("CORP", corp_identity, corp_stats),
@@ -250,6 +252,8 @@ class GameRenderer:
             fragments.append((style, f"{text}\n"))
 
         line("STATUS", "class:section")
+        if self.state.get("turn"):
+            line(self._turn_text(), "class:section")
         line(self._status_text())
         if self.state.get("revealed_cards"):
             line("Revealed: " + ", ".join(c["title"] for c in self.state["revealed_cards"]))
@@ -280,6 +284,13 @@ class GameRenderer:
             action_prompt = f"Waiting for {str(pending_player).title()} to choose an opening hand."
         elif is_end_of_turn_window(self.state, self.viewer_role):
             action_prompt = "Use any remaining paid abilities, or choose End turn. Required discards and opponent responses follow."
+        elif (
+            (self.state.get("decision") or {}).get("type") == "paid_ability_window"
+            and self.state["decision"].get("player") == self.viewer_role
+            and (self.state.get("turn") or {}).get("active_player") != self.viewer_role
+            and not self.state.get("run")
+        ):
+            action_prompt = "Your opponent's turn is in progress. Use a paid ability, or pass priority to let them continue."
         elif (self.state.get("decision") or {}).get("type") == "trash_for_memory":
             action_prompt = "The Runner must trash programs to fit available memory."
         elif (self.state.get("decision") or {}).get("type") == "discard_to_hand_limit":
@@ -439,6 +450,14 @@ class GameRenderer:
             owner = "Your" if card.get("controller_id") == self.you.get("player_id") else "Opponent's"
             rows.append(f"{owner} rig: {title}{self._installed_details(card)}")
         return rows
+
+    def _turn_text(self) -> str:
+        """Keep the active turn visible even when the other player has priority."""
+        turn = self.state["turn"]
+        active = str(turn["active_player"])
+        owner = "you" if active == self.viewer_role else "opponent"
+        phase = str(turn["phase"]).replace("_", " ")
+        return f"TURN {turn['number']} · {active.upper()} ({owner}) · {phase} phase"
 
     def _status_text(self) -> str:
         winner = self.state.get("winner")

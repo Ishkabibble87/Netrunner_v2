@@ -36,3 +36,34 @@ class OpeningHandRenderingTests(unittest.TestCase):
                             self.assertTrue(board.startswith("YOUR OPENING HAND\n"))
                         self.assertEqual(board.count("Hedge Fund · Operation\n"), 2)
                         self.assertIn("Palisade · Ice\n", board)
+
+
+class TurnContextRenderingTests(unittest.TestCase):
+    def test_opponent_turn_remains_visible_while_you_have_paid_priority(self):
+        for role in ("corp", "runner"):
+            other = "runner" if role == "corp" else "corp"
+            for compact in (False, True):
+                with self.subTest(role=role, compact=compact):
+                    state = {
+                        "turn": {"number": 2, "active_player": other, "phase": "action"},
+                        "you": {"role": role, "clicks_remaining": 0},
+                        "opponent": {"role": other, "clicks_remaining": 3},
+                        "decision": {"type": "paid_ability_window", "player": role},
+                    }
+                    renderer = GameRenderer({})
+                    renderer.set_context(state, role, [MenuLevel("Game", "root")], None, None)
+                    board = "".join(text for _, text in renderer._board_fragments(compact=compact))
+                    menu = "".join(text for _, text in renderer._menu_fragments())
+                    turn = f"TURN 2 · {other.upper()} (opponent) · action phase"
+                    self.assertTrue(board.startswith(turn))
+                    self.assertIn(turn, menu)
+                    self.assertIn("3 clicks", board)
+                    self.assertIn("0 clicks", board)
+                    self.assertIn("pass priority to let them continue", menu)
+                    state["turn"]["number"] = 3
+                    state["turn"]["active_player"] = role
+                    state["you"]["clicks_remaining"] = 3
+                    renderer.set_context(state, role, [MenuLevel("Game", "root")], None, None)
+                    menu = "".join(text for _, text in renderer._menu_fragments())
+                    self.assertIn(f"TURN 3 · {role.upper()} (you) · action phase", menu)
+                    self.assertNotIn("pass priority to let them continue", menu)
