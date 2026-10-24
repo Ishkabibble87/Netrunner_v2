@@ -48,6 +48,20 @@ def find_installed_card(state: dict[str, Any], instance_id: str) -> dict[str, An
     """Find an installed-card view entry without exposing hidden card faces."""
     return find_card(state.get("installed_cards", []), instance_id)
 
+
+def is_end_of_turn_window(state: dict[str, Any], viewer_role: str) -> bool:
+    """Identify the active player's paid window after all clicks are spent."""
+    turn = state.get("turn") or {}
+    decision = state.get("decision") or {}
+    return (
+        turn.get("active_player") == viewer_role
+        and turn.get("phase") in {"action", "discard"}
+        and state.get("you", {}).get("clicks_remaining") == 0
+        and not state.get("run")
+        and decision.get("type") == "paid_ability_window"
+        and decision.get("player") == viewer_role
+    )
+
 def players_by_role(
     you: dict[str, Any],
     opponent: dict[str, Any],
@@ -93,6 +107,8 @@ class GameRenderer:
         levels: list[MenuLevel],
         connection_status: Any,
         command_error: str | None,
+        *,
+        focused_panel: str = "menu",
     ) -> None:
         """Refresh the read-only data used while rendering the current screen."""
         self.state = state
@@ -103,6 +119,7 @@ class GameRenderer:
         self.levels = levels
         self.connection_status = connection_status
         self.command_error = command_error
+        self.focused_panel = focused_panel
 
     @property
     def level(self) -> MenuLevel:
@@ -123,10 +140,12 @@ class GameRenderer:
         return [("class:header", "ANDROID: NETRUNNER")]
 
     def _footer_fragments(self) -> list[tuple[str, str]]:
-        if self.level.kind == "card":
-            help_text = "↑/↓ Cards · Tab Panel · PgUp/PgDn Scroll · Esc Back · Q Quit"
+        if self.focused_panel == "board":
+            help_text = "BOARD · ↑/↓ Scroll · PgUp/PgDn Page · Tab/M Menu · Q Quit"
+        elif self.level.kind == "card":
+            help_text = "MENU · ↑/↓ Cards · Tab/B Board · PgUp/PgDn Scroll · Esc Back · Q Quit"
         else:
-            help_text = "↑/↓ Move · Tab Panel · PgUp/PgDn Scroll · Enter Open · Esc Back · Q Quit"
+            help_text = "MENU · ↑/↓ Move · Tab/B Board · PgUp/PgDn Scroll · Enter Open · Esc Back · Q Quit"
         return [("class:footer", help_text)]
 
     def _board_fragments(self, *, compact: bool) -> list[tuple[str, str]]:
@@ -134,6 +153,16 @@ class GameRenderer:
 
         def line(text: str = "", style: str = "") -> None:
             fragments.append((style, f"{text}\n"))
+
+        if self.state.get("turn"):
+            line(self._turn_text(), "class:section")
+            line()
+
+        if self.state.get("setup", {}).get("pending_player") is not None:
+            line("YOUR OPENING HAND", "class:section")
+            for card in self.hand:
+                line(f"{card['title']} · {str(card.get('card_type', '')).title()}")
+            line()
 
         if (self.state.get("turn") or {}).get("cannot_score"):
             line("Corp cannot score agendas for the remainder of this turn", "class:section")
@@ -185,10 +214,8 @@ class GameRenderer:
         runner_stats += f" · hand limit {runner.get('maximum_hand_size', 5)}"
         if runner.get("tags", 0):
             runner_stats += f" · {runner['tags']} tags"
-        if self.viewer_role == "corp":
-            corp_stats += f" · {corp.get('clicks_remaining', 0)} clicks"
-        if self.viewer_role == "runner":
-            runner_stats += f" · {runner.get('clicks_remaining', 0)} clicks"
+        corp_stats += f" · {corp.get('clicks_remaining', 0)} clicks"
+        runner_stats += f" · {runner.get('clicks_remaining', 0)} clicks"
 
         for title, identity, stats in (
             ("CORP", corp_identity, corp_stats),
@@ -215,6 +242,12 @@ class GameRenderer:
                 for item in items:
                     line(item)
                 line()
+        if self.state.get("setup", {}).get("pending_player") is None:
+            line(f"CARDS IN HAND · {len(self.hand)}", "class:section")
+            for card in self.hand:
+                line(f"{card['title']} · {str(card.get('card_type', '')).title()}")
+            if not self.hand:
+                line("Your hand is empty.", "class:muted")
         return fragments
 
     def _menu_fragments(self) -> list[tuple[str, str]]:
@@ -224,6 +257,8 @@ class GameRenderer:
             fragments.append((style, f"{text}\n"))
 
         line("STATUS", "class:section")
+        if self.state.get("turn"):
+            line(self._turn_text(), "class:section")
         line(self._status_text())
         if self.state.get("revealed_cards"):
             line("Revealed: " + ", ".join(c["title"] for c in self.state["revealed_cards"]))
@@ -247,11 +282,22 @@ class GameRenderer:
             return fragments
 
         line("ACTIONS", "class:section")
+        line(self._last_opponent_action(), "class:muted")
+        line()
         pending_player = self.state.get("setup", {}).get("pending_player")
         if pending_player == self.viewer_role:
             action_prompt = "Review your hand, then keep it or take one mulligan."
         elif pending_player is not None:
             action_prompt = f"Waiting for {str(pending_player).title()} to choose an opening hand."
+        elif is_end_of_turn_window(self.state, self.viewer_role):
+            action_prompt = "Use any remaining paid abilities, or choose End turn. Required discards and opponent responses follow."
+        elif (
+            (self.state.get("decision") or {}).get("type") == "paid_ability_window"
+            and self.state["decision"].get("player") == self.viewer_role
+            and (self.state.get("turn") or {}).get("active_player") != self.viewer_role
+            and not self.state.get("run")
+        ):
+            action_prompt = "Your opponent's turn is in progress. Use a paid ability, or pass priority to let them continue."
         elif (self.state.get("decision") or {}).get("type") == "trash_for_memory":
             action_prompt = "The Runner must trash programs to fit available memory."
         elif (self.state.get("decision") or {}).get("type") == "discard_to_hand_limit":
@@ -292,6 +338,25 @@ class GameRenderer:
             marker = "> " if index == self.level.selected else "  "
             line(f"{marker}{choice.label}", style)
         return fragments
+
+    def _last_opponent_action(self) -> str:
+        """Keep the latest opponent move visible through passes and your own actions.
+
+        Use only this viewer's history details, which omit hidden card faces.
+        Setup choices and priority passes do not replace a gameplay action.
+        """
+        opponent_role = "runner" if self.viewer_role == "corp" else "corp"
+        for entry in reversed(self.state.get("history", [])):
+            if entry.get("kind") != "command" or entry.get("actor") != opponent_role:
+                continue
+            detail = entry["detail"]
+            text = detail["text"]
+            if text == "Pass Priority" or text.startswith("Choose Mulligan:"):
+                continue
+            title = f"{detail['title']}: " if detail.get("title") else ""
+            turn = f" · turn {entry['turn_number']}" if entry.get("turn_number") else ""
+            return f"Last opponent action{turn}: {title}{text}"
+        return "Last opponent action: none yet."
 
     def _append_history(self, fragments: list[tuple[str, str]]) -> None:
         """Render the API's private history in order, grouped by turn and action."""
@@ -412,6 +477,14 @@ class GameRenderer:
             rows.append(f"{owner} rig: {title}{self._installed_details(card)}")
         return rows
 
+    def _turn_text(self) -> str:
+        """Keep the active turn visible even when the other player has priority."""
+        turn = self.state["turn"]
+        active = str(turn["active_player"])
+        owner = "you" if active == self.viewer_role else "opponent"
+        phase = str(turn["phase"]).replace("_", " ")
+        return f"TURN {turn['number']} · {active.upper()} ({owner}) · {phase} phase"
+
     def _status_text(self) -> str:
         winner = self.state.get("winner")
         if winner:
@@ -428,6 +501,8 @@ class GameRenderer:
             who = "You" if decision["player"] == self.viewer_role else str(decision["player"]).title()
             return f"{who}: " + ("choose cards" if decision["type"] == "choose_cards" else "choose an effect")
         if decision.get("type") in {"paid_ability_window", "resolve_reaction"}:
+            if is_end_of_turn_window(self.state, self.viewer_role):
+                return "No clicks remaining · finish paid abilities or end your turn"
             who = "You" if decision["player"] == self.viewer_role else str(decision["player"]).title()
             return f"{who}: " + ("paid ability window · act or pass" if decision["type"] == "paid_ability_window" else "resolve reaction")
         if decision.get("type") == "discard_to_hand_limit":
@@ -444,6 +519,8 @@ class GameRenderer:
     def _breadcrumb(self) -> str:
         if len(self.levels) == 1:
             return ""
+        if self.levels[1].kind == "actions":
+            return " / ".join(["Game", *(level.title for level in self.levels[1:])])
         labels = ["Inspect cards"]
         for level in self.levels[1:]:
             if level.kind == "servers":

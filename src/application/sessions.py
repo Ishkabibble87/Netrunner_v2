@@ -94,7 +94,7 @@ class SessionStore:
             if state.game_id in self._sessions:
                 raise ValueError("A session already exists for this game")
             ai_player_ids = {state.corp.player_id, state.runner.player_id} - humans
-            # Resolve scripted choices until the session needs a human decision.
+            # Resolve opponent choices until the session needs a human decision.
             session = GameSession(
                 state=advance_ai_decisions(state, ai_player_ids),
                 opponent_profile_id=opponent_profile_id,
@@ -132,7 +132,7 @@ class SessionStore:
         self, game_id: UUID, token: str, command: cmd.GameCommand,
         *, card_definitions: Mapping[str, CardDefinition] | None = None,
     ) -> tuple[GameSession, UUID]:
-        """Apply an authenticated command and advance scripted opponent decisions.
+        """Apply an authenticated command and advance opponent decisions.
 
         Rule validation happens in the game layer. On success, replace the
         immutable state snapshot and increment its revision under the same lock,

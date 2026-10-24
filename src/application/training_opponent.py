@@ -1,6 +1,7 @@
-"""Resolve scripted training-opponent choices through the game engine."""
+"""Exercise legal gameplay with a random, non-strategic training opponent."""
 
-from collections.abc import Mapping
+import random
+from collections.abc import Mapping, Sequence
 from uuid import UUID
 
 from content.cards.models import CardDefinition
@@ -23,16 +24,38 @@ def advance_ai_setup(state: GameState, ai_player_ids: set[UUID]) -> GameState:
     return state
 
 
+def choose_random_command(
+    actions: Sequence[cmd.GameCommand | cmd.CardSelection | cmd.DiscardSelection],
+) -> cmd.GameCommand:
+    """Sample a legal action and materialize any required random card selection."""
+    command = random.choice(actions)
+    if isinstance(command, (cmd.CardSelection, cmd.DiscardSelection)):
+        count = command.required_count
+        if isinstance(command, cmd.CardSelection):
+            if command.up_to:
+                count = random.randint(0, count)
+            elif command.optional:
+                count = random.choice((0, count))
+        selected = tuple(random.sample(command.eligible_card_instance_ids, count))
+        return (
+            cmd.SelectEffectCards(selected)
+            if isinstance(command, cmd.CardSelection)
+            else cmd.DiscardCards(selected)
+        )
+    return command
+
+
 def advance_ai_decisions(
     state: GameState,
     ai_player_ids: set[UUID],
     card_definitions: Mapping[str, CardDefinition] | None = None,
 ) -> GameState:
-    """Run the training policy until a human decision or game end.
+    """Choose random legal moves until a human decision or game end.
 
-    The opponent keeps its opening hand, gains credits, and discards the first
-    eligible excess cards. During a run the Corp rezzes affordable supported
-    cards. Every choice goes through the authoritative engine.
+    Opening hands are kept. Each later decision samples the engine's legal
+    actions, including passes and declines. Selection descriptors are converted
+    into commands with randomly sampled eligible cards, without enumerating all
+    combinations. Every submitted command still goes through the engine.
     """
     state = advance_ai_setup(state, ai_player_ids)
     while state.winner is None and state.turn is not None:
@@ -45,48 +68,6 @@ def advance_ai_decisions(
         if not actions:
             break
 
-        targets = next(
-            (action for action in actions if isinstance(action, cmd.CardSelection)),
-            None,
-        )
-        if targets is not None:
-            command = cmd.SelectEffectCards(
-                targets.eligible_card_instance_ids[:targets.required_count]
-            )
-        else:
-            selection = next(
-                (action for action in actions if isinstance(action, cmd.DiscardSelection)),
-                None,
-            )
-            if selection is not None:
-                command = cmd.DiscardCards(
-                    selection.eligible_card_instance_ids[:selection.required_count]
-                )
-            else:
-                command = next(
-                    (
-                        action for action in actions
-                        if isinstance(
-                            action,
-                            (
-                                cmd.ChooseEffectOption,
-                                cmd.SelectEffectCards,
-                                cmd.TrashPrograms,
-                                cmd.ResolveReaction,
-                                cmd.PassPriority,
-                            ),
-                        )
-                    ),
-                    cmd.GainCredit(),
-                )
-
-        if state.run is not None:
-            rez_command = next(
-                (action for action in actions if isinstance(action, cmd.RezCard)),
-                None,
-            )
-            if rez_command is not None:
-                command = rez_command
-
+        command = choose_random_command(actions)
         state = apply_command(state, player.player_id, command, card_definitions)
     return state

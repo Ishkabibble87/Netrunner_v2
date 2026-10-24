@@ -5,9 +5,11 @@ from typing import Any
 
 from .game_rendering import (
     MenuChoice,
+    MenuLevel,
     find_card,
     find_installed_card,
     host_label,
+    is_end_of_turn_window,
     server_label,
 )
 
@@ -30,6 +32,16 @@ def _mulligan(
     if decision == "mulligan":
         return _choice("Mulligan · shuffle and draw five", action)
     return []
+
+
+def _pass_priority(
+    state: dict[str, Any],
+    _catalog: dict[str, dict[str, Any]],
+    action: dict[str, Any],
+) -> list[MenuChoice]:
+    viewer_role = str(state.get("viewer_role", state.get("you", {}).get("role", "")))
+    label = "End turn · pass priority" if is_end_of_turn_window(state, viewer_role) else "Pass priority"
+    return _choice(label, action)
 
 def _run_action(
     state: dict[str, Any],
@@ -273,7 +285,6 @@ def _discard_cards(
     return [MenuChoice(label, "discard", action)]
 
 _SIMPLE_ACTION_LABELS = {
-    "pass_priority": "Pass priority",
     "gain_credit": "Gain 1 credit",
     "draw_card": "Draw cards · 1 click",
     "remove_tag": "Remove 1 tag · 2 credits",
@@ -281,6 +292,7 @@ _SIMPLE_ACTION_LABELS = {
 }
 
 _ACTION_FORMATTERS: dict[str, ActionFormatter] = {
+    "pass_priority": _pass_priority,
     "choose_mulligan": _mulligan,
     "run_server": _run_action,
     "continue_run": _run_action,
@@ -307,7 +319,7 @@ def build_action_choices(
     *,
     submit_action_available: bool,
 ) -> list[MenuChoice]:
-    """Format only server-authorized actions, preserving the legacy mulligan fallback."""
+    """Format legal actions, grouping ICE and upgrades by copy and destination."""
     if not submit_action_available:
         return []
 
@@ -328,11 +340,34 @@ def build_action_choices(
             )
         )
 
+    install_menus: dict[str, MenuLevel] = {}
+    install_cards: dict[str, MenuLevel] = {}
+    install_candidates = [*state.get("you", {}).get("hand", []), *state.get("selection_cards", [])]
     for action in actions:
         action_type = action.get("type")
         formatter = _ACTION_FORMATTERS.get(action_type)
         if formatter is not None:
-            choices.extend(formatter(state, catalog, action))
+            formatted = formatter(state, catalog, action)
+            card = (
+                find_card(install_candidates, action.get("card_instance_id"))
+                if action_type == "install_card" else None
+            )
+            if card and card.get("card_type") in {"ice", "upgrade"} and formatted:
+                card_type = card["card_type"]
+                if card_type not in install_menus:
+                    menu = MenuLevel(f"Install {card_type}", "actions")
+                    install_menus[card_type] = menu
+                    choices.append(MenuChoice(menu.title, "submenu", menu))
+                instance_id = card["instance_id"]
+                if instance_id not in install_cards:
+                    card_menu = MenuLevel(f"Install {card['title']}", "actions")
+                    install_cards[instance_id] = card_menu
+                    install_menus[card_type].choices.append(MenuChoice(card["title"], "submenu", card_menu))
+                for choice in formatted:
+                    choice.label = choice.label.removeprefix(f"Install {card['title']} in ")
+                    install_cards[instance_id].choices.append(choice)
+            else:
+                choices.extend(formatted)
         elif action_type in _SIMPLE_ACTION_LABELS:
             choices.extend(_choice(_SIMPLE_ACTION_LABELS[action_type], action))
     return choices
