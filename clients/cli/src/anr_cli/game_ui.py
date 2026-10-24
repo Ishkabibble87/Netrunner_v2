@@ -125,15 +125,15 @@ class GameScreen:
         wide = Condition(lambda: get_app().output.get_size().columns >= self.wide_columns)
         wide_layout = VSplit(
             [
-                Frame(self.board_pane, title="GAME BOARD", width=Dimension(weight=3)),
-                Frame(self.menu_pane, title="STATUS / MENU", width=Dimension(weight=2)),
+                Frame(self.board_pane, title=lambda: self._panel_title("GAME BOARD", "board"), width=Dimension(weight=3)),
+                Frame(self.menu_pane, title=lambda: self._panel_title("STATUS / MENU", "menu"), width=Dimension(weight=2)),
             ],
             padding=1,
         )
         narrow_layout = HSplit(
             [
-                Frame(self.board_pane, title="BOARD", height=Dimension(preferred=10, min=4, max=12)),
-                Frame(self.menu_pane, title="STATUS / MENU", height=Dimension(min=6, weight=1)),
+                Frame(self.board_pane, title=lambda: self._panel_title("BOARD", "board"), height=Dimension(preferred=10, min=4, max=12)),
+                Frame(self.menu_pane, title=lambda: self._panel_title("STATUS / MENU", "menu"), height=Dimension(min=6, weight=1)),
             ]
         )
         root = HSplit(
@@ -166,13 +166,17 @@ class GameScreen:
             self._scroll(-5)
 
         @bindings.add("tab")
+        @bindings.add("s-tab")
         def switch_panel(event: Any) -> None:
-            window = (
-                self.menu_window
-                if event.app.layout.current_window is self.board_window
-                else self.board_window
-            )
-            event.app.layout.focus(window)
+            self._focus_panel("menu" if self._board_focused() else "board")
+
+        @bindings.add("b")
+        def focus_board(event: Any) -> None:
+            self._focus_panel("board")
+
+        @bindings.add("m")
+        def focus_menu(event: Any) -> None:
+            self._focus_panel("menu")
 
         self.app = Application(
             input=get_terminal_input(),
@@ -219,7 +223,20 @@ class GameScreen:
             self.levels,
             self.connection_status,
             self.command_error,
+            focused_panel="board" if self._board_focused() else "menu",
         )
+
+    def _board_focused(self) -> bool:
+        return self.app is not None and self.app.layout.current_window is self.board_window
+
+    def _focus_panel(self, panel: str) -> None:
+        if self.app is not None:
+            self.app.layout.focus(self.board_window if panel == "board" else self.menu_window)
+            self._invalidate()
+
+    def _panel_title(self, title: str, panel: str) -> str:
+        active = "board" if self._board_focused() else "menu"
+        return f"{title} · ACTIVE" if panel == active else title
 
     def _header_fragments(self) -> list[tuple[str, str]]:
         self._set_render_context()
@@ -286,6 +303,9 @@ class GameScreen:
         self._invalidate()
 
     def _move(self, direction: int) -> None:
+        if self._board_focused():
+            self._scroll(direction)
+            return
         self._reset_menu_scroll()
         if self.level.kind == "card":
             cards = self.level.data["cards"]
@@ -296,6 +316,9 @@ class GameScreen:
         self._invalidate()
 
     def _activate(self) -> None:
+        if self._board_focused():
+            self._focus_panel("menu")
+            return
         if self.state_provider is not None:
             self.update_state(self.state_provider())
         level = self.level
@@ -479,6 +502,9 @@ class GameScreen:
         )
 
     def _back(self) -> None:
+        if self._board_focused():
+            self._focus_panel("menu")
+            return
         if len(self.levels) > 1:
             self.levels.pop()
         else:

@@ -107,6 +107,8 @@ class GameRenderer:
         levels: list[MenuLevel],
         connection_status: Any,
         command_error: str | None,
+        *,
+        focused_panel: str = "menu",
     ) -> None:
         """Refresh the read-only data used while rendering the current screen."""
         self.state = state
@@ -117,6 +119,7 @@ class GameRenderer:
         self.levels = levels
         self.connection_status = connection_status
         self.command_error = command_error
+        self.focused_panel = focused_panel
 
     @property
     def level(self) -> MenuLevel:
@@ -137,10 +140,12 @@ class GameRenderer:
         return [("class:header", "ANDROID: NETRUNNER")]
 
     def _footer_fragments(self) -> list[tuple[str, str]]:
-        if self.level.kind == "card":
-            help_text = "↑/↓ Cards · Tab Panel · PgUp/PgDn Scroll · Esc Back · Q Quit"
+        if self.focused_panel == "board":
+            help_text = "BOARD · ↑/↓ Scroll · PgUp/PgDn Page · Tab/M Menu · Q Quit"
+        elif self.level.kind == "card":
+            help_text = "MENU · ↑/↓ Cards · Tab/B Board · PgUp/PgDn Scroll · Esc Back · Q Quit"
         else:
-            help_text = "↑/↓ Move · Tab Panel · PgUp/PgDn Scroll · Enter Open · Esc Back · Q Quit"
+            help_text = "MENU · ↑/↓ Move · Tab/B Board · PgUp/PgDn Scroll · Enter Open · Esc Back · Q Quit"
         return [("class:footer", help_text)]
 
     def _board_fragments(self, *, compact: bool) -> list[tuple[str, str]]:
