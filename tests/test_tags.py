@@ -4,10 +4,13 @@ These scenarios cover boundaries that complement the growing core game path.
 Fixtures arrange a timing point; all player decisions use the real HTTP API.
 """
 
+from unittest.mock import patch
+
 from test_reactions import ReactionScenario
 
 from application.sessions import advance_ai_decisions
 from game.card_movement import trash_installed_card
+from game.commands import GainCredit
 from game.effects import resolve_effect
 from game.models import CardZone, PlayerRole, ServerArea, ServerLocation, ZoneLocation
 from game.tags import give_tags
@@ -285,6 +288,8 @@ class TagTests(ReactionScenario):
         self.assertEqual((self.state.runner.tags, self.state.runner.credits), (0, 0))
 
     def test_public_trail_last_runner_turn_history_and_ai_choice(self):
+        self.enterContext(patch("application.training_opponent.random.choice", side_effect=
+            lambda actions: next((a for a in actions if isinstance(a, GainCredit)), actions[0])))
         self.turn(PlayerRole.RUNNER, clicks=20)
         self.run_to_breach("hq")
         self.finish_breach()

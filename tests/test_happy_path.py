@@ -60,6 +60,9 @@ class GameProgressTests(unittest.TestCase):
     """Follow one Corp player from deck selection into a game against the AI."""
 
     def test_game_path(self):
+        # Keep this authored path repeatable while production opponents explore randomly.
+        self.enterContext(patch("application.training_opponent.random.choice", side_effect=
+            lambda actions: next((a for a in actions if isinstance(a, GainCredit)), actions[0])))
         self.cards = load_nsg_card_definitions(
             PROJECT_ROOT / "content/cards/system-gateway/cards.json"
         )

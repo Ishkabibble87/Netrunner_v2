@@ -2,6 +2,7 @@
 
 import unittest
 from collections import Counter
+from unittest.mock import patch
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
@@ -9,6 +10,7 @@ from fastapi.testclient import TestClient
 from api.app import create_app
 from application.game_setup import create_ai_game
 from application.sessions import advance_ai_decisions
+from game.commands import RezCard
 from game.models import CardZone, PlayerRole
 
 
@@ -279,6 +281,8 @@ class IceEncounterTests(RunScenario):
         self.assertIn(dict(self.ability(breaker, "break_barrier", (0,)), server_id=None), self.view()["legal_actions"])
 
     def test_training_corp_rezzes_supported_ice_during_human_run(self):
+        self.enterContext(patch("application.training_opponent.random.choice", side_effect=
+            lambda actions: next((a for a in actions if isinstance(a, RezCard)), actions[0])))
         ice = self.install("Palisade", "hq")
         self.runner_turn()
         self.breaker()
