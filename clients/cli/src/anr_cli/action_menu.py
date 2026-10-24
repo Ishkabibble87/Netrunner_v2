@@ -9,6 +9,7 @@ from .game_rendering import (
     find_card,
     find_installed_card,
     host_label,
+    is_end_of_turn_window,
     server_label,
 )
 
@@ -31,6 +32,16 @@ def _mulligan(
     if decision == "mulligan":
         return _choice("Mulligan · shuffle and draw five", action)
     return []
+
+
+def _pass_priority(
+    state: dict[str, Any],
+    _catalog: dict[str, dict[str, Any]],
+    action: dict[str, Any],
+) -> list[MenuChoice]:
+    viewer_role = str(state.get("viewer_role", state.get("you", {}).get("role", "")))
+    label = "End turn · pass priority" if is_end_of_turn_window(state, viewer_role) else "Pass priority"
+    return _choice(label, action)
 
 def _run_action(
     state: dict[str, Any],
@@ -274,7 +285,6 @@ def _discard_cards(
     return [MenuChoice(label, "discard", action)]
 
 _SIMPLE_ACTION_LABELS = {
-    "pass_priority": "Pass priority",
     "gain_credit": "Gain 1 credit",
     "draw_card": "Draw cards · 1 click",
     "remove_tag": "Remove 1 tag · 2 credits",
@@ -282,6 +292,7 @@ _SIMPLE_ACTION_LABELS = {
 }
 
 _ACTION_FORMATTERS: dict[str, ActionFormatter] = {
+    "pass_priority": _pass_priority,
     "choose_mulligan": _mulligan,
     "run_server": _run_action,
     "continue_run": _run_action,

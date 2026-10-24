@@ -48,6 +48,20 @@ def find_installed_card(state: dict[str, Any], instance_id: str) -> dict[str, An
     """Find an installed-card view entry without exposing hidden card faces."""
     return find_card(state.get("installed_cards", []), instance_id)
 
+
+def is_end_of_turn_window(state: dict[str, Any], viewer_role: str) -> bool:
+    """Identify the active player's paid window after all clicks are spent."""
+    turn = state.get("turn") or {}
+    decision = state.get("decision") or {}
+    return (
+        turn.get("active_player") == viewer_role
+        and turn.get("phase") in {"action", "discard"}
+        and state.get("you", {}).get("clicks_remaining") == 0
+        and not state.get("run")
+        and decision.get("type") == "paid_ability_window"
+        and decision.get("player") == viewer_role
+    )
+
 def players_by_role(
     you: dict[str, Any],
     opponent: dict[str, Any],
@@ -264,6 +278,8 @@ class GameRenderer:
             action_prompt = "Review your hand, then keep it or take one mulligan."
         elif pending_player is not None:
             action_prompt = f"Waiting for {str(pending_player).title()} to choose an opening hand."
+        elif is_end_of_turn_window(self.state, self.viewer_role):
+            action_prompt = "Use any remaining paid abilities, or choose End turn. Required discards and opponent responses follow."
         elif (self.state.get("decision") or {}).get("type") == "trash_for_memory":
             action_prompt = "The Runner must trash programs to fit available memory."
         elif (self.state.get("decision") or {}).get("type") == "discard_to_hand_limit":
@@ -440,6 +456,8 @@ class GameRenderer:
             who = "You" if decision["player"] == self.viewer_role else str(decision["player"]).title()
             return f"{who}: " + ("choose cards" if decision["type"] == "choose_cards" else "choose an effect")
         if decision.get("type") in {"paid_ability_window", "resolve_reaction"}:
+            if is_end_of_turn_window(self.state, self.viewer_role):
+                return "No clicks remaining · finish paid abilities or end your turn"
             who = "You" if decision["player"] == self.viewer_role else str(decision["player"]).title()
             return f"{who}: " + ("paid ability window · act or pass" if decision["type"] == "paid_ability_window" else "resolve reaction")
         if decision.get("type") == "discard_to_hand_limit":

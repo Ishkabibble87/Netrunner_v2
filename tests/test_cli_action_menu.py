@@ -3,6 +3,7 @@
 import unittest
 
 from clients.cli.src.anr_cli.action_menu import build_action_choices
+from clients.cli.src.anr_cli.game_rendering import GameRenderer, MenuLevel
 
 
 class InstallMenuTests(unittest.TestCase):
@@ -59,3 +60,38 @@ class InstallMenuTests(unittest.TestCase):
         self.assertEqual([choice.label for choice in choices], ["Install ice", "Install upgrade"])
         for choice, action in zip(choices, actions):
             self.assertEqual(choice.value.choices[0].value.choices[0].value, action)
+
+
+class EndTurnMenuTests(unittest.TestCase):
+    def test_end_turn_labels_only_the_active_players_final_paid_windows(self):
+        action = {"type": "pass_priority"}
+        for role in ("corp", "runner"):
+            other = "runner" if role == "corp" else "corp"
+            for phase, clicks, active, decision, run, label in (
+                ("action", 0, role, "paid_ability_window", None, "End turn · pass priority"),
+                ("discard", 0, role, "paid_ability_window", None, "End turn · pass priority"),
+                ("action", 1, role, "paid_ability_window", None, "Pass priority"),
+                ("action", 0, other, "paid_ability_window", None, "Pass priority"),
+                ("action", 0, role, "resolve_reaction", None, "Pass priority"),
+                ("action", 0, role, "paid_ability_window", {"phase": "encounter"}, "Pass priority"),
+            ):
+                with self.subTest(role=role, phase=phase, clicks=clicks, active=active, decision=decision, run=run):
+                    state = {
+                        "viewer_role": role,
+                        "you": {"role": role, "clicks_remaining": clicks},
+                        "turn": {"phase": phase, "active_player": active},
+                        "decision": {"type": decision, "player": role},
+                        "run": run,
+                        "legal_actions": [action],
+                    }
+                    choices = build_action_choices(state, {}, submit_action_available=True)
+                    self.assertEqual(choices[0].label, label)
+                    self.assertEqual(choices[0].value, action)
+                    renderer = GameRenderer({})
+                    renderer.set_context(state, role, [MenuLevel("Game", "root", choices)], None, None)
+                    menu = "".join(text for _, text in renderer._menu_fragments())
+                    if label.startswith("End turn"):
+                        self.assertIn("No clicks remaining", menu)
+                        self.assertIn("Required discards and opponent responses follow.", menu)
+                    else:
+                        self.assertNotIn("No clicks remaining", menu)
