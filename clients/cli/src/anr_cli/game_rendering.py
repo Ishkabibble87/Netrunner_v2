@@ -282,6 +282,8 @@ class GameRenderer:
             return fragments
 
         line("ACTIONS", "class:section")
+        line(self._last_opponent_action(), "class:muted")
+        line()
         pending_player = self.state.get("setup", {}).get("pending_player")
         if pending_player == self.viewer_role:
             action_prompt = "Review your hand, then keep it or take one mulligan."
@@ -336,6 +338,25 @@ class GameRenderer:
             marker = "> " if index == self.level.selected else "  "
             line(f"{marker}{choice.label}", style)
         return fragments
+
+    def _last_opponent_action(self) -> str:
+        """Keep the latest opponent move visible through passes and your own actions.
+
+        Use only this viewer's history details, which omit hidden card faces.
+        Setup choices and priority passes do not replace a gameplay action.
+        """
+        opponent_role = "runner" if self.viewer_role == "corp" else "corp"
+        for entry in reversed(self.state.get("history", [])):
+            if entry.get("kind") != "command" or entry.get("actor") != opponent_role:
+                continue
+            detail = entry["detail"]
+            text = detail["text"]
+            if text == "Pass Priority" or text.startswith("Choose Mulligan:"):
+                continue
+            title = f"{detail['title']}: " if detail.get("title") else ""
+            turn = f" · turn {entry['turn_number']}" if entry.get("turn_number") else ""
+            return f"Last opponent action{turn}: {title}{text}"
+        return "Last opponent action: none yet."
 
     def _append_history(self, fragments: list[tuple[str, str]]) -> None:
         """Render the API's private history in order, grouped by turn and action."""

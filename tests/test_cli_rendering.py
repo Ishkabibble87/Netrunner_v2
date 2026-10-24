@@ -67,3 +67,37 @@ class TurnContextRenderingTests(unittest.TestCase):
                     menu = "".join(text for _, text in renderer._menu_fragments())
                     self.assertIn(f"TURN 3 · {role.upper()} (you) · action phase", menu)
                     self.assertNotIn("pass priority to let them continue", menu)
+
+
+class OpponentActionRenderingTests(unittest.TestCase):
+    def test_latest_move_stays_visible_after_passes_and_your_own_actions(self):
+        for role in ("corp", "runner"):
+            other = "runner" if role == "corp" else "corp"
+            with self.subTest(role=role):
+                state = {"history": [
+                    {"kind": "command", "actor": other, "turn_number": 1,
+                     "detail": {"text": "Gain Credit"}},
+                    {"kind": "command", "actor": other, "turn_number": 2,
+                     "detail": {"text": "Play Card", "title": "Visible card"}},
+                    {"kind": "command", "actor": other, "detail": {"text": "Pass Priority"}},
+                    {"kind": "command", "actor": role, "detail": {"text": "Draw Card"}},
+                    {"kind": "resource", "actor": other, "detail": {"text": "Credits changed"}},
+                ]}
+                renderer = GameRenderer({})
+                renderer.set_context(state, role, [MenuLevel("Game", "root")], None, None)
+                menu = "".join(text for _, text in renderer._menu_fragments())
+                expected = "Last opponent action · turn 2: Visible card: Play Card"
+                self.assertIn("ACTIONS\n" + expected, menu)
+                state["history"].append({"kind": "command", "actor": other, "turn_number": 4,
+                                         "detail": {"text": "Install Card: hq"}})
+                # Hidden installed cards have no title in this viewer's history.
+                self.assertEqual(renderer._last_opponent_action(), "Last opponent action · turn 4: Install Card: hq")
+
+    def test_empty_history_and_setup_passes_have_no_opponent_move(self):
+        renderer = GameRenderer({})
+        for history in ([], [
+            {"kind": "command", "actor": "runner", "detail": {"text": "Choose Mulligan: keep"}},
+            {"kind": "command", "actor": "runner", "detail": {"text": "Pass Priority"}},
+        ]):
+            renderer.set_context({"history": history}, "corp", [MenuLevel("Game", "root")], None, None)
+            self.assertEqual(renderer._last_opponent_action(), "Last opponent action: none yet.")
