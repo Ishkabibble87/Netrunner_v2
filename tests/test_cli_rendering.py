@@ -30,8 +30,9 @@ class OpeningHandRenderingTests(unittest.TestCase):
                         board = "".join(text for _, text in renderer._board_fragments(compact=compact))
                         if pending is None:
                             self.assertNotIn("YOUR OPENING HAND", board)
-                            self.assertNotIn("Hedge Fund", board)
+                            self.assertIn("CARDS IN HAND · 3\n", board)
+                            self.assertGreater(board.index("CARDS IN HAND"), board.index("SCORE AREA"))
                         else:
                             self.assertTrue(board.startswith("YOUR OPENING HAND\n"))
-                            self.assertEqual(board.count("Hedge Fund · Operation\n"), 2)
-                            self.assertIn("Palisade · Ice\n", board)
+                        self.assertEqual(board.count("Hedge Fund · Operation\n"), 2)
+                        self.assertIn("Palisade · Ice\n", board)

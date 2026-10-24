@@ -5,6 +5,7 @@ from typing import Any
 
 from .game_rendering import (
     MenuChoice,
+    MenuLevel,
     find_card,
     find_installed_card,
     host_label,
@@ -307,7 +308,7 @@ def build_action_choices(
     *,
     submit_action_available: bool,
 ) -> list[MenuChoice]:
-    """Format only server-authorized actions, preserving the legacy mulligan fallback."""
+    """Format legal actions, grouping ICE by copy and destination for navigation."""
     if not submit_action_available:
         return []
 
@@ -328,11 +329,31 @@ def build_action_choices(
             )
         )
 
+    ice_menu = MenuLevel("Install ice", "actions")
+    ice_cards: dict[str, MenuLevel] = {}
+    install_candidates = [*state.get("you", {}).get("hand", []), *state.get("selection_cards", [])]
     for action in actions:
         action_type = action.get("type")
         formatter = _ACTION_FORMATTERS.get(action_type)
         if formatter is not None:
-            choices.extend(formatter(state, catalog, action))
+            formatted = formatter(state, catalog, action)
+            card = (
+                find_card(install_candidates, action.get("card_instance_id"))
+                if action_type == "install_card" else None
+            )
+            if card and card.get("card_type") == "ice" and formatted:
+                if not ice_cards:
+                    choices.append(MenuChoice("Install ice", "submenu", ice_menu))
+                instance_id = card["instance_id"]
+                if instance_id not in ice_cards:
+                    card_menu = MenuLevel(f"Install {card['title']}", "actions")
+                    ice_cards[instance_id] = card_menu
+                    ice_menu.choices.append(MenuChoice(card["title"], "submenu", card_menu))
+                for choice in formatted:
+                    choice.label = choice.label.removeprefix(f"Install {card['title']} in ")
+                    ice_cards[instance_id].choices.append(choice)
+            else:
+                choices.extend(formatted)
         elif action_type in _SIMPLE_ACTION_LABELS:
             choices.extend(_choice(_SIMPLE_ACTION_LABELS[action_type], action))
     return choices

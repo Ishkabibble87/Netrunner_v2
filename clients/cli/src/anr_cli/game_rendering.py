@@ -221,6 +221,12 @@ class GameRenderer:
                 for item in items:
                     line(item)
                 line()
+        if self.state.get("setup", {}).get("pending_player") is None:
+            line(f"CARDS IN HAND · {len(self.hand)}", "class:section")
+            for card in self.hand:
+                line(f"{card['title']} · {str(card.get('card_type', '')).title()}")
+            if not self.hand:
+                line("Your hand is empty.", "class:muted")
         return fragments
 
     def _menu_fragments(self) -> list[tuple[str, str]]:
@@ -450,6 +456,8 @@ class GameRenderer:
     def _breadcrumb(self) -> str:
         if len(self.levels) == 1:
             return ""
+        if self.levels[1].kind == "actions":
+            return " / ".join(["Game", *(level.title for level in self.levels[1:])])
         labels = ["Inspect cards"]
         for level in self.levels[1:]:
             if level.kind == "servers":

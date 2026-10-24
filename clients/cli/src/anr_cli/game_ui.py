@@ -32,6 +32,7 @@ from .navigation import navigation_bindings
 from .session import SessionConnectionError
 from .terminal import get_terminal_input
 
+
 class GameScreen:
     """Show private game snapshots and offer commands from the server's view."""
 
@@ -305,6 +306,7 @@ class GameScreen:
             "exit": self._exit_game,
             "back": lambda _choice: self._back(),
             "action": self._submit_action_choice,
+            "submenu": self._open_action_menu,
             "discard": self._begin_discard,
             "toggle_discard": self._toggle_discard,
             "history": self._open_history,
@@ -324,6 +326,13 @@ class GameScreen:
     def _exit_game(self, _choice: MenuChoice) -> None:
         if self.app is not None:
             self.app.exit()
+
+    def _open_action_menu(self, choice: MenuChoice) -> None:
+        """Navigate grouped legal actions without submitting until a leaf is chosen."""
+        menu = choice.value
+        self._push(MenuLevel(
+            menu.title, menu.kind, [*menu.choices, MenuChoice("Back", "back")],
+        ))
 
     def _submit_action_choice(self, choice: MenuChoice) -> None:
         try:
