@@ -135,6 +135,12 @@ class GameRenderer:
         def line(text: str = "", style: str = "") -> None:
             fragments.append((style, f"{text}\n"))
 
+        if self.state.get("setup", {}).get("pending_player") is not None:
+            line("YOUR OPENING HAND", "class:section")
+            for card in self.hand:
+                line(f"{card['title']} · {str(card.get('card_type', '')).title()}")
+            line()
+
         if (self.state.get("turn") or {}).get("cannot_score"):
             line("Corp cannot score agendas for the remainder of this turn", "class:section")
         run = self.state.get("run")
