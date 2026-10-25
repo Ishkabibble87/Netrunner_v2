@@ -14,6 +14,8 @@ uv run uvicorn api.app:app --reload
 
 The API listens at <http://127.0.0.1:8000>. Check that it is running at <http://127.0.0.1:8000/health>; interactive API docs are at <http://127.0.0.1:8000/docs>.
 
+See the [API guide](docs/api.md) for endpoint usage, authentication, commands, and WebSocket updates. The OpenAPI snapshot can be regenerated with `python docs/generate_openapi.py`.
+
 ## Run the CLI
 
 Keep the API running. Open a second terminal at the repository root and run:

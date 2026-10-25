@@ -1,0 +1,2705 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Android: Netrunner API",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "summary": "Health",
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object",
+                  "title": "Response Health Health Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/opponent-profiles": {
+      "get": {
+        "summary": "List Opponent Profiles",
+        "operationId": "list_opponent_profiles_opponent_profiles_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/OpponentProfileSummary"
+                  },
+                  "type": "array",
+                  "title": "Response List Opponent Profiles Opponent Profiles Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/preconstructed-decks": {
+      "get": {
+        "summary": "List Preconstructed Decks",
+        "operationId": "list_preconstructed_decks_preconstructed_decks_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PreconstructedDeckResponse"
+                  },
+                  "type": "array",
+                  "title": "Response List Preconstructed Decks Preconstructed Decks Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/card-catalog": {
+      "get": {
+        "summary": "List Card Catalog",
+        "operationId": "list_card_catalog_card_catalog_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/CardCatalogEntry"
+                  },
+                  "type": "array",
+                  "title": "Response List Card Catalog Card Catalog Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/decks/import": {
+      "post": {
+        "summary": "Import Deck",
+        "operationId": "import_deck_decks_import_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeckImportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeckSelection"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/games": {
+      "post": {
+        "summary": "Create Game",
+        "operationId": "create_game_games_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateGameRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GameCreatedResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/games/{game_id}/state": {
+      "get": {
+        "summary": "Game Snapshot",
+        "operationId": "game_snapshot_games__game_id__state_get",
+        "security": [
+          {
+            "PlayerToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "game_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Game Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InitialGameView"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/games/{game_id}/leave": {
+      "post": {
+        "summary": "Leave Game",
+        "operationId": "leave_game_games__game_id__leave_post",
+        "security": [
+          {
+            "PlayerToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "game_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Game Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/games/{game_id}/commands": {
+      "post": {
+        "summary": "Submit Command",
+        "description": "Apply one authenticated command and publish viewer-specific snapshots.",
+        "operationId": "submit_command_games__game_id__commands_post",
+        "security": [
+          {
+            "PlayerToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "game_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Game Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/RunServerCommandRequest"
+                  },
+                  {
+                    "$ref": "#/components/schemas/ContinueRunCommandRequest"
+                  },
+                  {
+                    "$ref": "#/components/schemas/JackOutCommandRequest"
+                  },
+                  {
+                    "$ref": "#/components/schemas/AccessCardCommandRequest"
+                  },
+                  {
+                    "$ref": "#/components/schemas/FinishAccessCommandRequest"
+                  },
+                  {
+                    "$ref": "#/components/schemas/MulliganCommandRequest"
+                  },
+                  {
+                    "$ref": "#/components/schemas/GainCreditCommandRequest"
+                  },
+                  {
+                    "$ref": "#/components/schemas/DrawCardCommandRequest"
+                  },
+                  {
+                    "$ref": "#/components/schemas/RemoveTagCommandRequest"
+                  },
+                  {
+                    "$ref": "#/components/schemas/SelectEffectCardsRequest"
+                  },
+                  {
+                    "$ref": "#/components/schemas/ChooseEffectOptionRequest"
+                  },
+                  {
+                    "$ref": "#/components/schemas/TrashResourceRequest"
+                  },
+                  {
+                    "$ref": "#/components/schemas/PurgeVirusCountersCommandRequest"
+                  },
+                  {
+                    "$ref": "#/components/schemas/DiscardCardsCommandRequest"
+                  },
+                  {
+                    "$ref": "#/components/schemas/TrashProgramsCommandRequest"
+                  },
+                  {
+                    "$ref": "#/components/schemas/PlayCardCommandRequest"
+                  },
+                  {
+                    "$ref": "#/components/schemas/InstallCardCommandRequest"
+                  },
+                  {
+                    "$ref": "#/components/schemas/RezCardCommandRequest"
+                  },
+                  {
+                    "$ref": "#/components/schemas/UseCardAbilityCommandRequest"
+                  },
+                  {
+                    "$ref": "#/components/schemas/AdvanceCardCommandRequest"
+                  },
+                  {
+                    "$ref": "#/components/schemas/ScoreAgendaCommandRequest"
+                  },
+                  {
+                    "$ref": "#/components/schemas/PassPriorityCommandRequest"
+                  },
+                  {
+                    "$ref": "#/components/schemas/ResolveReactionCommandRequest"
+                  }
+                ],
+                "discriminator": {
+                  "propertyName": "type",
+                  "mapping": {
+                    "run_server": "#/components/schemas/RunServerCommandRequest",
+                    "continue_run": "#/components/schemas/ContinueRunCommandRequest",
+                    "jack_out": "#/components/schemas/JackOutCommandRequest",
+                    "access_card": "#/components/schemas/AccessCardCommandRequest",
+                    "finish_access": "#/components/schemas/FinishAccessCommandRequest",
+                    "choose_mulligan": "#/components/schemas/MulliganCommandRequest",
+                    "gain_credit": "#/components/schemas/GainCreditCommandRequest",
+                    "draw_card": "#/components/schemas/DrawCardCommandRequest",
+                    "remove_tag": "#/components/schemas/RemoveTagCommandRequest",
+                    "select_effect_cards": "#/components/schemas/SelectEffectCardsRequest",
+                    "choose_effect_option": "#/components/schemas/ChooseEffectOptionRequest",
+                    "trash_resource": "#/components/schemas/TrashResourceRequest",
+                    "purge_virus_counters": "#/components/schemas/PurgeVirusCountersCommandRequest",
+                    "discard_cards": "#/components/schemas/DiscardCardsCommandRequest",
+                    "trash_programs": "#/components/schemas/TrashProgramsCommandRequest",
+                    "play_card": "#/components/schemas/PlayCardCommandRequest",
+                    "install_card": "#/components/schemas/InstallCardCommandRequest",
+                    "rez_card": "#/components/schemas/RezCardCommandRequest",
+                    "use_card_ability": "#/components/schemas/UseCardAbilityCommandRequest",
+                    "advance_card": "#/components/schemas/AdvanceCardCommandRequest",
+                    "score_agenda": "#/components/schemas/ScoreAgendaCommandRequest",
+                    "pass_priority": "#/components/schemas/PassPriorityCommandRequest",
+                    "resolve_reaction": "#/components/schemas/ResolveReactionCommandRequest"
+                  }
+                },
+                "title": "Request"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionSnapshot"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AccessCardCommandRequest": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "access_card",
+            "title": "Type"
+          },
+          "target": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "string",
+                "enum": [
+                  "hq",
+                  "rd"
+                ]
+              }
+            ],
+            "title": "Target"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "target"
+        ],
+        "title": "AccessCardCommandRequest"
+      },
+      "AdvanceCardCommandRequest": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "advance_card",
+            "title": "Type"
+          },
+          "card_instance_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Card Instance Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "card_instance_id"
+        ],
+        "title": "AdvanceCardCommandRequest"
+      },
+      "CardCatalogEntry": {
+        "properties": {
+          "definition_id": {
+            "type": "string",
+            "title": "Definition Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "side": {
+            "$ref": "#/components/schemas/CardSide"
+          },
+          "card_type": {
+            "$ref": "#/components/schemas/CardType"
+          },
+          "faction_code": {
+            "type": "string",
+            "title": "Faction Code"
+          },
+          "subtypes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Subtypes"
+          },
+          "printed_text": {
+            "type": "string",
+            "title": "Printed Text"
+          },
+          "is_unique": {
+            "type": "boolean",
+            "title": "Is Unique"
+          },
+          "play_cost": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Play Cost"
+          },
+          "install_cost": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Install Cost"
+          },
+          "rez_cost": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rez Cost"
+          },
+          "trash_cost": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trash Cost"
+          },
+          "advancement_requirement": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Advancement Requirement"
+          },
+          "agenda_points": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agenda Points"
+          },
+          "strength": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Strength"
+          },
+          "memory_cost": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memory Cost"
+          },
+          "influence_cost": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Influence Cost"
+          },
+          "deck_limit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deck Limit"
+          },
+          "base_link": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Link"
+          },
+          "minimum_deck_size": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Minimum Deck Size"
+          },
+          "influence_limit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Influence Limit"
+          },
+          "flavor_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Flavor Text"
+          },
+          "illustrator": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Illustrator"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "definition_id",
+          "title",
+          "side",
+          "card_type",
+          "faction_code",
+          "subtypes",
+          "printed_text",
+          "is_unique",
+          "play_cost",
+          "install_cost",
+          "rez_cost",
+          "trash_cost",
+          "advancement_requirement",
+          "agenda_points",
+          "strength",
+          "memory_cost",
+          "influence_cost",
+          "deck_limit",
+          "base_link",
+          "minimum_deck_size",
+          "influence_limit",
+          "flavor_text",
+          "illustrator"
+        ],
+        "title": "CardCatalogEntry"
+      },
+      "CardSelectionAction": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "select_effect_cards",
+            "title": "Type",
+            "default": "select_effect_cards"
+          },
+          "eligible_card_instance_ids": {
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": "array",
+            "title": "Eligible Card Instance Ids"
+          },
+          "required_count": {
+            "type": "integer",
+            "title": "Required Count"
+          },
+          "optional": {
+            "type": "boolean",
+            "title": "Optional",
+            "default": false
+          },
+          "up_to": {
+            "type": "boolean",
+            "title": "Up To",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "eligible_card_instance_ids",
+          "required_count"
+        ],
+        "title": "CardSelectionAction",
+        "description": "Private eligible set; the server validates the submitted selection."
+      },
+      "CardSide": {
+        "type": "string",
+        "enum": [
+          "corp",
+          "runner"
+        ],
+        "title": "CardSide"
+      },
+      "CardType": {
+        "type": "string",
+        "enum": [
+          "identity",
+          "agenda",
+          "asset",
+          "ice",
+          "operation",
+          "upgrade",
+          "event",
+          "hardware",
+          "program",
+          "resource"
+        ],
+        "title": "CardType"
+      },
+      "CardView": {
+        "properties": {
+          "instance_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Instance Id"
+          },
+          "definition_id": {
+            "type": "string",
+            "title": "Definition Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "card_type": {
+            "$ref": "#/components/schemas/CardType"
+          },
+          "ability_labels": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Ability Labels"
+          },
+          "paid_ability_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Paid Ability Ids"
+          },
+          "strength": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Strength"
+          },
+          "effective_install_cost": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective Install Cost"
+          },
+          "effective_rez_cost": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective Rez Cost"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "instance_id",
+          "definition_id",
+          "title",
+          "card_type"
+        ],
+        "title": "CardView"
+      },
+      "CentralServer": {
+        "type": "string",
+        "enum": [
+          "hq",
+          "rd",
+          "archives"
+        ],
+        "title": "CentralServer",
+        "description": "The three Corp servers that exist for the entire game."
+      },
+      "ChooseEffectOptionRequest": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "choose_effect_option",
+            "title": "Type"
+          },
+          "option_id": {
+            "type": "string",
+            "title": "Option Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "option_id"
+        ],
+        "title": "ChooseEffectOptionRequest",
+        "description": "Select an offered effect; labels are projected separately by the server."
+      },
+      "ContinueRunCommandRequest": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "continue_run",
+            "title": "Type"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type"
+        ],
+        "title": "ContinueRunCommandRequest"
+      },
+      "CreateGameRequest": {
+        "properties": {
+          "player_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Player Id"
+          },
+          "decklist": {
+            "$ref": "#/components/schemas/DeckSelection"
+          },
+          "opponent_profile_id": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Opponent Profile Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "player_id",
+          "decklist",
+          "opponent_profile_id"
+        ],
+        "title": "CreateGameRequest"
+      },
+      "DecisionView": {
+        "properties": {
+          "player": {
+            "$ref": "#/components/schemas/PlayerRole"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "choose_opening_hand",
+              "choose_action",
+              "discard_to_hand_limit",
+              "paid_ability_window",
+              "resolve_reaction",
+              "choose_effect",
+              "choose_cards",
+              "continue_run",
+              "choose_access",
+              "resolve_access",
+              "trash_for_memory"
+            ],
+            "title": "Type"
+          },
+          "cards_to_discard": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cards To Discard"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "player",
+          "type"
+        ],
+        "title": "DecisionView",
+        "description": "Public context shared by both players, never hidden card choices."
+      },
+      "DeckImportRequest": {
+        "properties": {
+          "text": {
+            "type": "string",
+            "title": "Text"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "text"
+        ],
+        "title": "DeckImportRequest"
+      },
+      "DeckSelection": {
+        "properties": {
+          "identity_definition_id": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Identity Definition Id"
+          },
+          "card_counts": {
+            "additionalProperties": {
+              "type": "integer",
+              "exclusiveMinimum": 0.0
+            },
+            "type": "object",
+            "title": "Card Counts",
+            "description": "Main-deck card definition IDs and their selected copy counts"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "identity_definition_id"
+        ],
+        "title": "DeckSelection",
+        "description": "The chosen identity and card-definition counts used to build a player's deck."
+      },
+      "DiscardCardsAction": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "discard_cards",
+            "title": "Type",
+            "default": "discard_cards"
+          },
+          "eligible_card_instance_ids": {
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": "array",
+            "title": "Eligible Card Instance Ids"
+          },
+          "required_count": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Required Count"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "eligible_card_instance_ids",
+          "required_count"
+        ],
+        "title": "DiscardCardsAction",
+        "description": "A private selection action, avoiding combinatorial command enumeration."
+      },
+      "DiscardCardsCommandRequest": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "discard_cards",
+            "title": "Type"
+          },
+          "card_instance_ids": {
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Card Instance Ids"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "card_instance_ids"
+        ],
+        "title": "DiscardCardsCommandRequest",
+        "description": "Submit the complete set of excess cards; the engine checks eligibility."
+      },
+      "DrawCardCommandRequest": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "draw_card",
+            "title": "Type"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type"
+        ],
+        "title": "DrawCardCommandRequest",
+        "description": "Request the one-click basic action that draws one card."
+      },
+      "FinishAccessCommandRequest": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "finish_access",
+            "title": "Type"
+          },
+          "trash": {
+            "type": "boolean",
+            "title": "Trash",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type"
+        ],
+        "title": "FinishAccessCommandRequest"
+      },
+      "GainCreditCommandRequest": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "gain_credit",
+            "title": "Type"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type"
+        ],
+        "title": "GainCreditCommandRequest",
+        "description": "Request the one-click basic action that gains one credit."
+      },
+      "GameCreatedResponse": {
+        "properties": {
+          "opponent_profile_id": {
+            "type": "string",
+            "title": "Opponent Profile Id"
+          },
+          "player_token": {
+            "type": "string",
+            "title": "Player Token"
+          },
+          "reconnect_timeout_seconds": {
+            "type": "number",
+            "title": "Reconnect Timeout Seconds"
+          },
+          "initial_state": {
+            "$ref": "#/components/schemas/InitialGameView"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "opponent_profile_id",
+          "player_token",
+          "reconnect_timeout_seconds",
+          "initial_state"
+        ],
+        "title": "GameCreatedResponse"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "HiddenSelectionCardView": {
+        "properties": {
+          "instance_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Instance Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title",
+            "default": "Unrezzed ice"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "instance_id"
+        ],
+        "title": "HiddenSelectionCardView",
+        "description": "An installed target can be chosen by position without revealing its identity."
+      },
+      "HistoryDetail": {
+        "properties": {
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "field": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Field"
+          },
+          "before": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Before"
+          },
+          "after": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "After"
+          },
+          "definition_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Definition Id"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "text"
+        ],
+        "title": "HistoryDetail",
+        "description": "One viewer's immutable description, without trackable hidden-card IDs."
+      },
+      "HistoryView": {
+        "properties": {
+          "entry_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Entry Id"
+          },
+          "sequence": {
+            "type": "integer",
+            "title": "Sequence"
+          },
+          "turn_number": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Turn Number"
+          },
+          "turn_player": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PlayerRole"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "group_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Group Id"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Id"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          },
+          "actor": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PlayerRole"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "detail": {
+            "$ref": "#/components/schemas/HistoryDetail"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "entry_id",
+          "sequence",
+          "turn_number",
+          "turn_player",
+          "group_id",
+          "parent_id",
+          "run_id",
+          "actor",
+          "kind",
+          "detail"
+        ],
+        "title": "HistoryView",
+        "description": "A history occurrence containing only the authenticated viewer's details."
+      },
+      "InitialGameView": {
+        "properties": {
+          "game_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Game Id"
+          },
+          "history": {
+            "items": {
+              "$ref": "#/components/schemas/HistoryView"
+            },
+            "type": "array",
+            "title": "History"
+          },
+          "viewer_player_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Viewer Player Id"
+          },
+          "viewer_role": {
+            "$ref": "#/components/schemas/PlayerRole"
+          },
+          "setup": {
+            "$ref": "#/components/schemas/SetupView"
+          },
+          "turn": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TurnView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "winner": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PlayerRole"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "decision": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DecisionView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "legal_actions": {
+            "items": {
+              "anyOf": [
+                {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/RunServerCommandRequest"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ContinueRunCommandRequest"
+                    },
+                    {
+                      "$ref": "#/components/schemas/JackOutCommandRequest"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AccessCardCommandRequest"
+                    },
+                    {
+                      "$ref": "#/components/schemas/FinishAccessCommandRequest"
+                    },
+                    {
+                      "$ref": "#/components/schemas/MulliganCommandRequest"
+                    },
+                    {
+                      "$ref": "#/components/schemas/GainCreditCommandRequest"
+                    },
+                    {
+                      "$ref": "#/components/schemas/DrawCardCommandRequest"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RemoveTagCommandRequest"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SelectEffectCardsRequest"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ChooseEffectOptionRequest"
+                    },
+                    {
+                      "$ref": "#/components/schemas/TrashResourceRequest"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PurgeVirusCountersCommandRequest"
+                    },
+                    {
+                      "$ref": "#/components/schemas/DiscardCardsCommandRequest"
+                    },
+                    {
+                      "$ref": "#/components/schemas/TrashProgramsCommandRequest"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PlayCardCommandRequest"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InstallCardCommandRequest"
+                    },
+                    {
+                      "$ref": "#/components/schemas/RezCardCommandRequest"
+                    },
+                    {
+                      "$ref": "#/components/schemas/UseCardAbilityCommandRequest"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AdvanceCardCommandRequest"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ScoreAgendaCommandRequest"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PassPriorityCommandRequest"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ResolveReactionCommandRequest"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "type",
+                    "mapping": {
+                      "access_card": "#/components/schemas/AccessCardCommandRequest",
+                      "advance_card": "#/components/schemas/AdvanceCardCommandRequest",
+                      "choose_effect_option": "#/components/schemas/ChooseEffectOptionRequest",
+                      "choose_mulligan": "#/components/schemas/MulliganCommandRequest",
+                      "continue_run": "#/components/schemas/ContinueRunCommandRequest",
+                      "discard_cards": "#/components/schemas/DiscardCardsCommandRequest",
+                      "draw_card": "#/components/schemas/DrawCardCommandRequest",
+                      "finish_access": "#/components/schemas/FinishAccessCommandRequest",
+                      "gain_credit": "#/components/schemas/GainCreditCommandRequest",
+                      "install_card": "#/components/schemas/InstallCardCommandRequest",
+                      "jack_out": "#/components/schemas/JackOutCommandRequest",
+                      "pass_priority": "#/components/schemas/PassPriorityCommandRequest",
+                      "play_card": "#/components/schemas/PlayCardCommandRequest",
+                      "purge_virus_counters": "#/components/schemas/PurgeVirusCountersCommandRequest",
+                      "remove_tag": "#/components/schemas/RemoveTagCommandRequest",
+                      "resolve_reaction": "#/components/schemas/ResolveReactionCommandRequest",
+                      "rez_card": "#/components/schemas/RezCardCommandRequest",
+                      "run_server": "#/components/schemas/RunServerCommandRequest",
+                      "score_agenda": "#/components/schemas/ScoreAgendaCommandRequest",
+                      "select_effect_cards": "#/components/schemas/SelectEffectCardsRequest",
+                      "trash_programs": "#/components/schemas/TrashProgramsCommandRequest",
+                      "trash_resource": "#/components/schemas/TrashResourceRequest",
+                      "use_card_ability": "#/components/schemas/UseCardAbilityCommandRequest"
+                    }
+                  }
+                },
+                {
+                  "$ref": "#/components/schemas/DiscardCardsAction"
+                },
+                {
+                  "$ref": "#/components/schemas/CardSelectionAction"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Legal Actions",
+            "description": "Commands currently available to this viewer; submission is validated again"
+          },
+          "you": {
+            "$ref": "#/components/schemas/OwnPlayerView"
+          },
+          "opponent": {
+            "$ref": "#/components/schemas/OpponentView"
+          },
+          "servers": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Servers"
+          },
+          "reactions": {
+            "items": {
+              "$ref": "#/components/schemas/ReactionView"
+            },
+            "type": "array",
+            "title": "Reactions"
+          },
+          "effect_options": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Effect Options"
+          },
+          "selection_cards": {
+            "items": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/CardView"
+                },
+                {
+                  "$ref": "#/components/schemas/HiddenSelectionCardView"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Selection Cards"
+          },
+          "revealed_cards": {
+            "items": {
+              "$ref": "#/components/schemas/CardView"
+            },
+            "type": "array",
+            "title": "Revealed Cards"
+          },
+          "removed_cards": {
+            "items": {
+              "$ref": "#/components/schemas/CardView"
+            },
+            "type": "array",
+            "title": "Removed Cards"
+          },
+          "effect_install": {
+            "type": "boolean",
+            "title": "Effect Install",
+            "default": false
+          },
+          "installed_cards": {
+            "items": {
+              "$ref": "#/components/schemas/InstalledCardView"
+            },
+            "type": "array",
+            "title": "Installed Cards"
+          },
+          "run": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "game_id",
+          "viewer_player_id",
+          "viewer_role",
+          "setup",
+          "turn",
+          "winner",
+          "decision",
+          "legal_actions",
+          "you",
+          "opponent",
+          "servers",
+          "installed_cards"
+        ],
+        "title": "InitialGameView",
+        "description": "Current state projection with private cards and legal actions for one viewer."
+      },
+      "InstallCardCommandRequest": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "install_card",
+            "title": "Type"
+          },
+          "card_instance_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Card Instance Id"
+          },
+          "server_id": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CentralServer"
+              },
+              {
+                "type": "integer",
+                "minimum": 1.0,
+                "description": "One-based current position among remote servers"
+              },
+              {
+                "type": "string",
+                "const": "new_remote"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Server Id"
+          },
+          "trash_card_instance_ids": {
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": "array",
+            "title": "Trash Card Instance Ids"
+          },
+          "host_card_instance_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Host Card Instance Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "card_instance_id"
+        ],
+        "title": "InstallCardCommandRequest"
+      },
+      "InstalledCardView": {
+        "properties": {
+          "instance_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Instance Id"
+          },
+          "server_id": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CentralServer"
+              },
+              {
+                "type": "integer",
+                "minimum": 1.0,
+                "description": "One-based current position among remote servers"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Server Id"
+          },
+          "controller_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Controller Id"
+          },
+          "rezzed": {
+            "type": "boolean",
+            "title": "Rezzed"
+          },
+          "area": {
+            "type": "string",
+            "title": "Area"
+          },
+          "host_card_instance_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Host Card Instance Id"
+          },
+          "ice_distance_from_server": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ice Distance From Server"
+          },
+          "face_up": {
+            "type": "boolean",
+            "title": "Face Up"
+          },
+          "counters": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Counters"
+          },
+          "card": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CardView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "instance_id",
+          "server_id",
+          "controller_id",
+          "rezzed",
+          "area",
+          "ice_distance_from_server",
+          "face_up",
+          "counters",
+          "card"
+        ],
+        "title": "InstalledCardView",
+        "description": "Public position and counters, with identity concealed from the Runner."
+      },
+      "JackOutCommandRequest": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "jack_out",
+            "title": "Type"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type"
+        ],
+        "title": "JackOutCommandRequest"
+      },
+      "MulliganCommandRequest": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "choose_mulligan",
+            "title": "Type"
+          },
+          "decision": {
+            "$ref": "#/components/schemas/MulliganDecision"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "decision"
+        ],
+        "title": "MulliganCommandRequest",
+        "description": "Choose whether to keep the current opening hand or mulligan."
+      },
+      "MulliganDecision": {
+        "type": "string",
+        "enum": [
+          "keep",
+          "mulligan"
+        ],
+        "title": "MulliganDecision"
+      },
+      "OpponentProfileSummary": {
+        "properties": {
+          "profile_id": {
+            "type": "string",
+            "title": "Profile Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "profile_id",
+          "name"
+        ],
+        "title": "OpponentProfileSummary"
+      },
+      "OpponentView": {
+        "properties": {
+          "player_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Player Id"
+          },
+          "role": {
+            "$ref": "#/components/schemas/PlayerRole"
+          },
+          "credits": {
+            "type": "integer",
+            "title": "Credits"
+          },
+          "clicks_remaining": {
+            "type": "integer",
+            "title": "Clicks Remaining"
+          },
+          "tags": {
+            "type": "integer",
+            "title": "Tags"
+          },
+          "memory_limit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memory Limit"
+          },
+          "memory_used": {
+            "type": "integer",
+            "title": "Memory Used",
+            "default": 0
+          },
+          "identity": {
+            "$ref": "#/components/schemas/CardView"
+          },
+          "deck_count": {
+            "type": "integer",
+            "title": "Deck Count"
+          },
+          "maximum_hand_size": {
+            "type": "integer",
+            "title": "Maximum Hand Size"
+          },
+          "agenda_points": {
+            "type": "integer",
+            "title": "Agenda Points"
+          },
+          "score_area": {
+            "items": {
+              "$ref": "#/components/schemas/CardView"
+            },
+            "type": "array",
+            "title": "Score Area"
+          },
+          "discard_count": {
+            "type": "integer",
+            "title": "Discard Count"
+          },
+          "discard_pile": {
+            "items": {
+              "$ref": "#/components/schemas/CardView"
+            },
+            "type": "array",
+            "title": "Discard Pile"
+          },
+          "hand_count": {
+            "type": "integer",
+            "title": "Hand Count"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "player_id",
+          "role",
+          "credits",
+          "clicks_remaining",
+          "tags",
+          "identity",
+          "deck_count",
+          "maximum_hand_size",
+          "agenda_points",
+          "score_area",
+          "discard_count",
+          "discard_pile",
+          "hand_count"
+        ],
+        "title": "OpponentView"
+      },
+      "OwnPlayerView": {
+        "properties": {
+          "player_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Player Id"
+          },
+          "role": {
+            "$ref": "#/components/schemas/PlayerRole"
+          },
+          "credits": {
+            "type": "integer",
+            "title": "Credits"
+          },
+          "clicks_remaining": {
+            "type": "integer",
+            "title": "Clicks Remaining"
+          },
+          "tags": {
+            "type": "integer",
+            "title": "Tags"
+          },
+          "memory_limit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memory Limit"
+          },
+          "memory_used": {
+            "type": "integer",
+            "title": "Memory Used",
+            "default": 0
+          },
+          "identity": {
+            "$ref": "#/components/schemas/CardView"
+          },
+          "deck_count": {
+            "type": "integer",
+            "title": "Deck Count"
+          },
+          "maximum_hand_size": {
+            "type": "integer",
+            "title": "Maximum Hand Size"
+          },
+          "agenda_points": {
+            "type": "integer",
+            "title": "Agenda Points"
+          },
+          "score_area": {
+            "items": {
+              "$ref": "#/components/schemas/CardView"
+            },
+            "type": "array",
+            "title": "Score Area"
+          },
+          "discard_count": {
+            "type": "integer",
+            "title": "Discard Count"
+          },
+          "discard_pile": {
+            "items": {
+              "$ref": "#/components/schemas/CardView"
+            },
+            "type": "array",
+            "title": "Discard Pile"
+          },
+          "hand": {
+            "items": {
+              "$ref": "#/components/schemas/CardView"
+            },
+            "type": "array",
+            "title": "Hand"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "player_id",
+          "role",
+          "credits",
+          "clicks_remaining",
+          "tags",
+          "identity",
+          "deck_count",
+          "maximum_hand_size",
+          "agenda_points",
+          "score_area",
+          "discard_count",
+          "discard_pile",
+          "hand"
+        ],
+        "title": "OwnPlayerView"
+      },
+      "PassPriorityCommandRequest": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "pass_priority",
+            "title": "Type"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type"
+        ],
+        "title": "PassPriorityCommandRequest"
+      },
+      "PlayCardCommandRequest": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "play_card",
+            "title": "Type"
+          },
+          "card_instance_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Card Instance Id"
+          },
+          "server_id": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CentralServer"
+              },
+              {
+                "type": "integer",
+                "minimum": 1.0,
+                "description": "One-based current position among remote servers"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Server Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "card_instance_id"
+        ],
+        "title": "PlayCardCommandRequest",
+        "description": "Identify the physical copy; costs and instructions are server-owned."
+      },
+      "PlayerRole": {
+        "type": "string",
+        "enum": [
+          "corp",
+          "runner"
+        ],
+        "title": "PlayerRole"
+      },
+      "PreconstructedDeckResponse": {
+        "properties": {
+          "deck_id": {
+            "type": "string",
+            "title": "Deck Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "role": {
+            "$ref": "#/components/schemas/PlayerRole"
+          },
+          "decklist": {
+            "$ref": "#/components/schemas/DeckSelection"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "deck_id",
+          "name",
+          "role",
+          "decklist"
+        ],
+        "title": "PreconstructedDeckResponse"
+      },
+      "PurgeVirusCountersCommandRequest": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "purge_virus_counters",
+            "title": "Type"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type"
+        ],
+        "title": "PurgeVirusCountersCommandRequest",
+        "description": "Request the Corp's three-click virus-counter purge action."
+      },
+      "ReactionView": {
+        "properties": {
+          "reaction_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Reaction Id"
+          },
+          "card_instance_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Card Instance Id"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "optional": {
+            "type": "boolean",
+            "title": "Optional"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "reaction_id",
+          "card_instance_id",
+          "label",
+          "optional"
+        ],
+        "title": "ReactionView",
+        "description": "Reaction labels visible only to the player choosing their next ability."
+      },
+      "RemoveTagCommandRequest": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "remove_tag",
+            "title": "Type"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type"
+        ],
+        "title": "RemoveTagCommandRequest",
+        "description": "Request the Runner's one-click, two-credit tag-removal action."
+      },
+      "ResolveReactionCommandRequest": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "resolve_reaction",
+            "title": "Type"
+          },
+          "card_instance_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Card Instance Id"
+          },
+          "reaction_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reaction Id"
+          },
+          "decline": {
+            "type": "boolean",
+            "title": "Decline",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "card_instance_id"
+        ],
+        "title": "ResolveReactionCommandRequest"
+      },
+      "RezCardCommandRequest": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "rez_card",
+            "title": "Type"
+          },
+          "card_instance_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Card Instance Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "card_instance_id"
+        ],
+        "title": "RezCardCommandRequest"
+      },
+      "RunServerCommandRequest": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "run_server",
+            "title": "Type"
+          },
+          "server_id": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CentralServer"
+              },
+              {
+                "type": "integer",
+                "minimum": 1.0,
+                "description": "One-based current position among remote servers"
+              }
+            ],
+            "title": "Server Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "server_id"
+        ],
+        "title": "RunServerCommandRequest"
+      },
+      "RunView": {
+        "properties": {
+          "server_id": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CentralServer"
+              },
+              {
+                "type": "integer",
+                "minimum": 1.0,
+                "description": "One-based current position among remote servers"
+              }
+            ],
+            "title": "Server Id"
+          },
+          "phase": {
+            "type": "string",
+            "title": "Phase"
+          },
+          "successful": {
+            "type": "boolean",
+            "title": "Successful"
+          },
+          "cannot_steal_or_trash": {
+            "type": "boolean",
+            "title": "Cannot Steal Or Trash",
+            "default": false
+          },
+          "bad_publicity_credits": {
+            "type": "integer",
+            "title": "Bad Publicity Credits"
+          },
+          "event_credits": {
+            "type": "integer",
+            "title": "Event Credits",
+            "default": 0
+          },
+          "source_event": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CardView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "source_card": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CardView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "source_ability_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Ability Id"
+          },
+          "access_count": {
+            "type": "integer",
+            "title": "Access Count",
+            "default": 0
+          },
+          "agendas_stolen": {
+            "type": "integer",
+            "title": "Agendas Stolen",
+            "default": 0
+          },
+          "central_access_limit": {
+            "type": "integer",
+            "title": "Central Access Limit",
+            "default": 1
+          },
+          "central_accesses": {
+            "type": "integer",
+            "title": "Central Accesses",
+            "default": 0
+          },
+          "current_card": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CardView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "current_ice_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Ice Id"
+          },
+          "current_ice": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CardView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "subroutines": {
+            "items": {
+              "$ref": "#/components/schemas/SubroutineView"
+            },
+            "type": "array",
+            "title": "Subroutines"
+          },
+          "rez_allowed": {
+            "type": "boolean",
+            "title": "Rez Allowed",
+            "default": false
+          },
+          "accessed_cards": {
+            "items": {
+              "$ref": "#/components/schemas/CardView"
+            },
+            "type": "array",
+            "title": "Accessed Cards"
+          },
+          "access_note": {
+            "type": "string",
+            "title": "Access Note",
+            "default": "Access abilities resolve before trashing or stealing."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "server_id",
+          "phase",
+          "successful",
+          "bad_publicity_credits",
+          "current_card",
+          "accessed_cards"
+        ],
+        "title": "RunView",
+        "description": "Public run progress and viewer-specific temporary access information."
+      },
+      "ScoreAgendaCommandRequest": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "score_agenda",
+            "title": "Type"
+          },
+          "card_instance_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Card Instance Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "card_instance_id"
+        ],
+        "title": "ScoreAgendaCommandRequest"
+      },
+      "SelectEffectCardsRequest": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "select_effect_cards",
+            "title": "Type"
+          },
+          "card_instance_ids": {
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": "array",
+            "title": "Card Instance Ids"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "card_instance_ids"
+        ],
+        "title": "SelectEffectCardsRequest"
+      },
+      "SessionSnapshot": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "state",
+            "title": "Type",
+            "default": "state"
+          },
+          "revision": {
+            "type": "integer",
+            "title": "Revision",
+            "default": 0
+          },
+          "state": {
+            "$ref": "#/components/schemas/InitialGameView"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "state"
+        ],
+        "title": "SessionSnapshot"
+      },
+      "SetupView": {
+        "properties": {
+          "pending_player": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PlayerRole"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "decisions": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/MulliganDecision"
+            },
+            "propertyNames": {
+              "$ref": "#/components/schemas/PlayerRole"
+            },
+            "type": "object",
+            "title": "Decisions"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "pending_player",
+          "decisions"
+        ],
+        "title": "SetupView"
+      },
+      "SubroutineView": {
+        "properties": {
+          "index": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Index"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "broken": {
+            "type": "boolean",
+            "title": "Broken"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "index",
+          "label",
+          "broken"
+        ],
+        "title": "SubroutineView",
+        "description": "An ordered public subroutine and its status in the current encounter."
+      },
+      "TrashProgramsCommandRequest": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "trash_programs",
+            "title": "Type"
+          },
+          "card_instance_ids": {
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Card Instance Ids"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "card_instance_ids"
+        ],
+        "title": "TrashProgramsCommandRequest",
+        "description": "Choose programs to trash after losing available memory."
+      },
+      "TrashResourceRequest": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "trash_resource",
+            "title": "Type"
+          },
+          "card_instance_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Card Instance Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "card_instance_id"
+        ],
+        "title": "TrashResourceRequest"
+      },
+      "TurnView": {
+        "properties": {
+          "number": {
+            "type": "integer",
+            "title": "Number"
+          },
+          "active_player": {
+            "$ref": "#/components/schemas/PlayerRole"
+          },
+          "phase": {
+            "type": "string",
+            "title": "Phase"
+          },
+          "cannot_score": {
+            "type": "boolean",
+            "title": "Cannot Score",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "number",
+          "active_player",
+          "phase"
+        ],
+        "title": "TurnView"
+      },
+      "UseCardAbilityCommandRequest": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "use_card_ability",
+            "title": "Type"
+          },
+          "card_instance_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Card Instance Id"
+          },
+          "ability_id": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Ability Id"
+          },
+          "subroutine_indices": {
+            "items": {
+              "type": "integer",
+              "minimum": 0.0
+            },
+            "type": "array",
+            "title": "Subroutine Indices"
+          },
+          "server_id": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CentralServer"
+              },
+              {
+                "type": "integer",
+                "minimum": 1.0,
+                "description": "One-based current position among remote servers"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Server Id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "card_instance_id",
+          "ability_id"
+        ],
+        "title": "UseCardAbilityCommandRequest"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    },
+    "securitySchemes": {
+      "PlayerToken": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    }
+  }
+}
