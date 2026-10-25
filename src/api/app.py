@@ -9,7 +9,6 @@ from uuid import UUID
 from fastapi import (
     Depends,
     FastAPI,
-    Header,
     HTTPException,
     Request,
     WebSocket,
@@ -17,6 +16,7 @@ from fastapi import (
     status,
 )
 from fastapi.responses import JSONResponse
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from application.game_setup import GameSetupError, create_ai_game
 from application.sessions import (
@@ -106,11 +106,22 @@ def create_app(
     async def denied_session(request: Request, error: SessionAccessDenied) -> JSONResponse:
         return JSONResponse(status_code=403, content={"detail": str(error)})
 
-    def player_token(authorization: str | None = Header(default=None)) -> str:
+    bearer_scheme = HTTPBearer(auto_error=False, scheme_name="PlayerToken")
+
+    def parse_player_token(authorization: str | None) -> str:
         scheme, _, token = (authorization or "").partition(" ")
         if scheme.lower() != "bearer" or not token:
             raise HTTPException(status_code=401, detail="A player session token is required")
         return token
+
+    def player_token(
+        credentials: Annotated[
+            HTTPAuthorizationCredentials | None, Depends(bearer_scheme)
+        ],
+    ) -> str:
+        if credentials is None:
+            raise HTTPException(status_code=401, detail="A player session token is required")
+        return parse_player_token(f"{credentials.scheme} {credentials.credentials}")
 
     @api.get("/health")
     def health() -> dict[str, str]:
@@ -222,7 +233,7 @@ def create_app(
     @api.websocket("/games/{game_id}/events")
     async def game_events(websocket: WebSocket, game_id: UUID) -> None:
         try:
-            token = player_token(websocket.headers.get("authorization"))
+            token = parse_player_token(websocket.headers.get("authorization"))
             sessions.get(game_id, token)
         except (HTTPException, SessionNotFound, SessionAccessDenied):
             await websocket.close(code=1008, reason="Game session unavailable")
