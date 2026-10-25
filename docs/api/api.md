@@ -6,7 +6,7 @@ checked-in snapshot is [`openapi.json`](openapi.json); regenerate it from the
 application's routes and Pydantic schemas with:
 
 ```powershell
-python docs/generate_openapi.py
+python docs/api/generate_openapi.py
 ```
 
 The WebSocket endpoint is described here because WebSockets are not represented
